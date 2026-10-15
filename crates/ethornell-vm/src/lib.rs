@@ -8504,10 +8504,31 @@ impl Vm {
     /// BP push order: `[name, output_ptr, bit_offset]`; native pop order:
     /// `bit_offset`, `output_ptr`, `name`. The immediate result is a status;
     /// the queried boolean is written to `output_ptr`.
+    ///
+    /// Some system scripts push the first two the other way round:
+    /// Wonderful Everyday's `scrmain._bp` pushes `[output_ptr, name,
+    /// bit_offset]` (the flag variable, then the current script's name in
+    /// its script table). Taking that name as the output pointer overwrote
+    /// it on every scenario instruction, so saves held empty script names.
+    /// The name is therefore whichever argument names a read-flag table;
+    /// when neither does, the order above applies.
     fn sys80_8b_query_read_flag_bit(&mut self) -> VmResult<Value> {
         let bit_offset = self.pop_int()?;
-        let output_ptr = self.pop_ptr()?;
-        let name = self.pop_string_lossy()?;
+        let second = self.pop_value()?;
+        let first = self.pop_value()?;
+        let first_name = self.value_as_native_string_lossy(first.clone());
+        let swapped = !first_name
+            .as_ref()
+            .is_ok_and(|name| self.read_flags.contains_key(name))
+            && self
+                .value_as_native_string_lossy(second.clone())
+                .is_ok_and(|name| self.read_flags.contains_key(&name));
+        let (name, output) = if swapped {
+            (self.value_as_native_string_lossy(second)?, first)
+        } else {
+            (first_name?, second)
+        };
+        let output_ptr = Self::translate_system_descriptor(output.as_i32() as u32);
         let (status, enabled) = match (self.read_flags.get(&name), u32::try_from(bit_offset)) {
             (None, _) => (1, false),
             (Some(_), Err(_)) => (2, false),
@@ -17489,6 +17510,46 @@ mod tests {
             Value::Int(15),
         ]);
         assert_eq!(vm.try_builtin_sys(0x80, 0x8b).unwrap(), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn read_flag_query_accepts_the_output_pointer_before_the_name() {
+        // Wonderful Everyday's scrmain._bp pushes the flag variable, then a
+        // pointer to the current script's name in its script table.
+        let flag = 0x1000;
+        let name = 0x2000;
+        let mut vm = Vm::new();
+        vm.write_c_string(name, "main").unwrap();
+        vm.stack.extend([Value::Str("main".into()), Value::Int(16)]);
+        assert_eq!(vm.try_builtin_sys(0x80, 0x88).unwrap(), Some(Value::Int(1)));
+        vm.stack
+            .extend([Value::Str("main".into()), Value::Int(15), Value::Int(1)]);
+        assert_eq!(vm.try_builtin_sys(0x80, 0x89).unwrap(), Some(Value::Int(0)));
+
+        for (bit, expected) in [(15, 1), (14, 0)] {
+            vm.write_int(flag, 2, 7).unwrap();
+            vm.stack.extend([
+                Value::Int(flag as i32),
+                Value::Int(name as i32),
+                Value::Int(bit),
+            ]);
+            assert_eq!(vm.try_builtin_sys(0x80, 0x8b).unwrap(), Some(Value::Int(0)));
+            assert_eq!(vm.read_int(flag, 2).unwrap(), expected);
+            assert_eq!(vm.read_c_string(name).unwrap(), "main");
+        }
+    }
+
+    #[test]
+    fn read_flag_query_without_a_table_keeps_the_documented_order() {
+        let mut vm = Vm::new();
+        vm.write_int(0x1000, 2, 7).unwrap();
+        vm.stack.extend([
+            Value::Str("missing".into()),
+            Value::Ptr(0x1000),
+            Value::Int(3),
+        ]);
+        assert_eq!(vm.try_builtin_sys(0x80, 0x8b).unwrap(), Some(Value::Int(1)));
+        assert_eq!(vm.read_int(0x1000, 2).unwrap(), 0);
     }
 
     #[test]
