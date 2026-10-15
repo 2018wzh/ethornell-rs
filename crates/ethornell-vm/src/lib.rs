@@ -11028,6 +11028,19 @@ impl Vm {
                 self.replace_stack_value(index, Value::Str(cleaned.to_string()));
             } else if is_plausible_text_payload(&text) {
                 self.replace_stack_value(index, Value::Str(text));
+            } else if let Value::Int(value) = original
+                && value != 0
+                && self
+                    .read_c_string_bytes(value as u32)
+                    .is_ok_and(|bytes| bytes.is_empty())
+            {
+                // An integer addressing VM memory that holds an empty string,
+                // with no descriptor string around it, is a cleared buffer
+                // (scrmsg clears the message window's speaker name between
+                // speakers and passes its address, computed with `add`, as
+                // an integer). sub_48DF50 converts it to an empty `char *`;
+                // left as an integer, the renderer draws it as "0x...".
+                self.replace_stack_value(index, Value::Str(String::new()));
             }
         }
         Ok(())
@@ -15268,6 +15281,41 @@ mod tests {
             vm.stack[auxiliary_index],
             Value::Str("auxiliary text".into())
         );
+    }
+
+    #[test]
+    fn graph92_render_text_integer_address_of_an_empty_buffer_is_empty_text() {
+        let mut vm = Vm::new();
+        // The message window's speaker-name buffer, as the script computes it.
+        let name_buffer = 86024 + 79240;
+        // Out of reach of the descriptor search (it looks up to 64 bytes away).
+        let text_buffer = name_buffer + 0x1000;
+        vm.write_c_string(name_buffer as u32, "").unwrap();
+        vm.write_c_string(text_buffer as u32, "a line").unwrap();
+        vm.stack.extend((0..21).map(Value::Int));
+        let primary_index = vm.stack.len() - 1 - 17;
+        let auxiliary_index = vm.stack.len() - 1 - 14;
+        vm.stack[primary_index] = Value::Int(name_buffer);
+        vm.stack[auxiliary_index] = Value::Int(text_buffer);
+
+        vm.normalize_graph_string_args(0x92, 0x9c).unwrap();
+
+        assert_eq!(vm.stack[primary_index], Value::Str(String::new()));
+        assert_eq!(vm.stack[auxiliary_index], Value::Str("a line".into()));
+    }
+
+    #[test]
+    fn graph92_render_text_keeps_integers_outside_memory() {
+        let mut vm = Vm::new();
+        let outside = super::INITIAL_MEMORY_SIZE as i32 + 0x10;
+        assert!(outside as usize >= vm.memory.len());
+        vm.stack.extend((0..21).map(Value::Int));
+        let primary_index = vm.stack.len() - 1 - 17;
+        vm.stack[primary_index] = Value::Int(outside);
+
+        vm.normalize_graph_string_args(0x92, 0x9c).unwrap();
+
+        assert_eq!(vm.stack[primary_index], Value::Int(outside));
     }
 
     #[test]
