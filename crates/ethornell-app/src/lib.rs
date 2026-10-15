@@ -6952,6 +6952,7 @@ impl RuntimeTraceApi {
         self.push_title_compatibility_items(&mut items);
         self.push_surface_draw_items(&mut items);
         let mut inactive_backgrounds = BTreeSet::new();
+        let mut backf_secondaries = Vec::new();
         for (layer_id, layer) in &self.graph_layers {
             if !self.should_draw_graph_layer(*layer_id, layer) {
                 continue;
@@ -7182,6 +7183,14 @@ impl RuntimeTraceApi {
                 });
             }
             let mut order_serial = self.display_order_serial(*layer_id, layer.owner_object);
+            if backf_secondary {
+                // The secondary is BackF's first pass (sub_41D590), so it
+                // takes the object's own place in the chain, the primary's,
+                // and is moved in front of the primary after sorting.
+                let owner = layer.owner_object.unwrap_or(*layer_id);
+                order_serial = self.display_order_serial(owner, None);
+                backf_secondaries.push((Some(owner), draw_key.to_string()));
+            }
             if self.surface_controls.contains_layer(*layer_id)
                 && let Some(surface) = layer
                     .target_surface
@@ -7272,6 +7281,23 @@ impl RuntimeTraceApi {
         // entries. Preserve that chain order; the old reversed order is only
         // available through ETHORNELL_LEGACY_REVERSE_EQUAL_DEPTH.
         items.sort_by_key(native_draw_order);
+        for (owner, key) in backf_secondaries {
+            let Some(secondary) = items
+                .iter()
+                .position(|item| item.owner_object == owner && item.key == key)
+            else {
+                continue;
+            };
+            let order = native_draw_order(&items[secondary]);
+            if let Some(first) = items
+                .iter()
+                .position(|item| item.owner_object == owner && native_draw_order(item) == order)
+                && first < secondary
+            {
+                let item = items.remove(secondary);
+                items.insert(first, item);
+            }
+        }
         items
     }
 
@@ -10246,6 +10272,70 @@ mod input_tests {
         assert_eq!(keys(&api), ["test:back"]);
         call_graph(&mut api, 0x90, 0x4c, &mut vec![Value::Int(0), Value::Int(1)]).unwrap();
         assert!(keys(&api).is_empty(), "draw gate off");
+    }
+
+    fn store_test_bitmap(api: &mut super::RuntimeTraceApi, bitmap: i32, key: &str, pixel: [u8; 4]) {
+        api.store_graph_image(
+            key.to_string(),
+            DecodedImage {
+                width: 4,
+                height: 3,
+                rgba: pixel.repeat(4 * 3),
+            },
+        );
+        api.graph_resources
+            .insert(bitmap, RuntimeGraphResource::whole(key.to_string()));
+        api.bitmap_formats.insert(bitmap, 1);
+    }
+
+    #[test]
+    fn graph90_43_backf_draws_its_secondary_beneath_the_primary() {
+        let manager =
+            ethornell_archive::ResourceManager::open_game(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let mut api = super::RuntimeTraceApi::new(manager);
+        activate_backgrounds(&mut api);
+        store_test_bitmap(&mut api, 128, "test:backf-new", [200, 100, 50, 255]);
+        store_test_bitmap(&mut api, 130, "test:backf-old", [10, 20, 30, 255]);
+
+        // A scene change in Wonderful Everyday's scrgrp2._bp: the new frame
+        // over the old one, half transparent.
+        let mut configure = [0, 0, 128, 0, 0, 130, -1, 0, 128].map(Value::Int).to_vec();
+        call_graph(&mut api, 0x90, 0x43, &mut configure).unwrap();
+        // In the game the secondary's layer handle also has a place in the
+        // display chain, after its object's, which drew it on top.
+        api.display_tree
+            .register_inferred(super::native_background::BACK_F_SECONDARY_LAYER_ID);
+
+        let keys = api
+            .graph_output_draw_items()
+            .into_iter()
+            .map(|item| item.key)
+            .collect::<Vec<_>>();
+        assert_eq!(keys.len(), 2, "{keys:?}");
+        assert_eq!(keys[0], "test:backf-old", "{keys:?}");
+    }
+
+    #[test]
+    fn graph90_05_capture_starts_from_the_background_above_its_bound() {
+        let manager =
+            ethornell_archive::ResourceManager::open_game(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let mut api = super::RuntimeTraceApi::new(manager);
+        activate_backgrounds(&mut api);
+        store_test_bitmap(&mut api, 3791, "test:background", [200, 100, 50, 255]);
+        // scrgrp2._bp builds the background while the default priority is
+        // 72, then captures the frame up to priority 71.
+        api.graph_default_priority = 72;
+        let mut configure = [0, 0, 3791, 0, 0, 0x7fff, -1, 0, 0]
+            .map(Value::Int)
+            .to_vec();
+        call_graph(&mut api, 0x90, 0x43, &mut configure).unwrap();
+        assert_eq!(api.graph_layers[&0].z, 72);
+
+        let mut capture = vec![Value::Int(128), Value::Int(71)];
+        call_graph(&mut api, 0x90, 0x05, &mut capture).unwrap();
+
+        let captured = &api.graph_images["runtime:priority-bitmap:128"];
+        assert_eq!(&captured.rgba[..4], &[200, 100, 50, 255]);
     }
 
     #[test]

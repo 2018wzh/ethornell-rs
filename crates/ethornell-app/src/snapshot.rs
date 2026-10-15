@@ -120,11 +120,25 @@ pub(crate) fn compose_runtime_frame_through_priority(
 
     // sub_430D30 draws the same CObjectManager list as the frame, stopping at
     // the priority bound; stale Back-class resources are not part of it.
+    //
+    // A bounded capture starts from the current background whatever its own
+    // priority. Wonderful Everyday's scrgrp2._bp captures the two frames of a
+    // scene change up to priority 71 (90:05 into 130 and 128) while its BackF
+    // holds the background at 72, the default priority when it was built,
+    // above the scene's sprites (16 + n). Without it both captures, and so
+    // the whole transition, were black.
     let draw_items = api.graph_output_draw_items();
-    for item in draw_items {
-        if maximum_priority.is_some_and(|maximum| item.z > maximum) {
-            continue;
-        }
+    let (backgrounds, others): (Vec<_>, Vec<_>) = draw_items.into_iter().partition(|item| {
+        maximum_priority.is_some()
+            && item
+                .owner_object
+                .and_then(|owner| api.graph_object_properties.get(&owner))
+                .is_some_and(|properties| properties.background.is_some())
+    });
+    let others = others
+        .into_iter()
+        .filter(|item| maximum_priority.is_none_or(|maximum| item.z <= maximum));
+    for item in backgrounds.into_iter().chain(others) {
         let Some(src) = api.graph_images.get(&item.key) else {
             continue;
         };
