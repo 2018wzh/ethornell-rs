@@ -1,3 +1,14 @@
+/// Encoded audio shared without copying (a movie's soundtrack). `Debug`
+/// prints only its size, since audio commands are logged.
+#[derive(Clone)]
+pub(crate) struct StreamBytes(pub(crate) std::sync::Arc<[u8]>);
+
+impl std::fmt::Debug for StreamBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StreamBytes({} bytes)", self.0.len())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct AudioAsset {
     pub(crate) archive: String,
@@ -97,6 +108,13 @@ pub(crate) enum AudioCommand {
         panning: f64,
         fade_ms: u64,
         restart: bool,
+    },
+    /// A movie soundtrack, decoded while it plays.
+    PlayStream {
+        channel: i32,
+        bytes: StreamBytes,
+        volume: f64,
+        start_ms: u64,
     },
     Pause {
         channel: i32,
@@ -230,6 +248,24 @@ pub(crate) fn execute_audio_command(
                     %err,
                     "script audio playback failed"
                 ),
+            }
+        }
+        AudioCommand::PlayStream {
+            channel,
+            bytes,
+            volume,
+            start_ms,
+        } => {
+            match audio.play_stream_on_channel(channel, bytes.0.clone(), false, volume, start_ms) {
+                Ok(()) => tracing::info!(
+                    frontend,
+                    channel,
+                    volume,
+                    start_ms,
+                    bytes = bytes.0.len(),
+                    "movie audio playback requested"
+                ),
+                Err(err) => tracing::warn!(frontend, channel, %err, "movie audio playback failed"),
             }
         }
         AudioCommand::Pause {

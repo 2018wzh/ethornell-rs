@@ -2,13 +2,15 @@ use ethornell_core::{EthornellError, Result};
 use kira::dsp::Frame;
 use kira::manager::{AudioManager, AudioManagerSettings};
 use kira::sound::{
-    PlaybackPosition, PlaybackState,
+    FromFileError, PlaybackPosition, PlaybackState,
     static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings},
+    streaming::{StreamingSoundData, StreamingSoundHandle, StreamingSoundSettings},
 };
 use kira::tween::Tween;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io::Cursor;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,6 +114,9 @@ pub struct AudioSystem {
     manager: AudioManager,
     volume: f64,
     channels: BTreeMap<i32, StaticSoundHandle>,
+    /// Channels playing a sound that is decoded while it plays (movie
+    /// soundtracks). A channel is in at most one of the two maps.
+    streams: BTreeMap<i32, StreamingSoundHandle<FromFileError>>,
     next_unmanaged_channel: i32,
 }
 
@@ -123,6 +128,7 @@ impl AudioSystem {
             manager,
             volume: 1.0,
             channels: BTreeMap::new(),
+            streams: BTreeMap::new(),
             next_unmanaged_channel: i32::MIN,
         })
     }
@@ -271,7 +277,43 @@ impl AudioSystem {
         if let Some(mut previous) = self.channels.insert(channel, handle) {
             let _ = previous.stop(Tween::default());
         }
+        if let Some(mut previous) = self.streams.remove(&channel) {
+            let _ = previous.stop(Tween::default());
+        }
         Ok(true)
+    }
+
+    /// Plays `bytes` (any stream Symphonia can probe, such as a movie's MPEG
+    /// audio elementary stream) on `channel`, replacing what the channel
+    /// played. Decoding happens on kira's streaming thread, so a long
+    /// soundtrack neither stalls the caller nor is held decoded in memory.
+    pub fn play_stream_on_channel(
+        &mut self,
+        channel: i32,
+        bytes: Arc<[u8]>,
+        looped: bool,
+        volume: f64,
+        start_ms: u64,
+    ) -> Result<()> {
+        let mut settings = StreamingSoundSettings::default()
+            .volume(volume.clamp(0.0, 1.0))
+            .playback_region(Duration::from_millis(start_ms).as_secs_f64()..);
+        if looped {
+            settings = settings.loop_region(..);
+        }
+        let data = StreamingSoundData::from_cursor(Cursor::new(bytes), settings)
+            .map_err(|err| EthornellError::Other(format!("load audio stream failed: {err}")))?;
+        let handle = self
+            .manager
+            .play(data)
+            .map_err(|err| EthornellError::Other(format!("play audio stream failed: {err}")))?;
+        if let Some(mut previous) = self.channels.remove(&channel) {
+            let _ = previous.stop(Tween::default());
+        }
+        if let Some(mut previous) = self.streams.insert(channel, handle) {
+            let _ = previous.stop(Tween::default());
+        }
+        Ok(())
     }
 
     pub fn stop_all(&mut self) {
@@ -279,9 +321,20 @@ impl AudioSystem {
             let _ = handle.stop(Tween::default());
         }
         self.channels.clear();
+        for handle in self.streams.values_mut() {
+            let _ = handle.stop(Tween::default());
+        }
+        self.streams.clear();
     }
 
     pub fn stop_channel(&mut self, channel: i32, fade_out_ms: u64) {
+        if let Some(handle) = self.streams.get_mut(&channel) {
+            let _ = handle.stop(Tween {
+                duration: Duration::from_millis(fade_out_ms),
+                ..Tween::default()
+            });
+            return;
+        }
         let Some(handle) = self.channels.get_mut(&channel) else {
             return;
         };
@@ -292,12 +345,20 @@ impl AudioSystem {
     }
 
     pub fn pause_channel(&mut self, channel: i32, paused: bool, fade_ms: u64) {
-        let Some(handle) = self.channels.get_mut(&channel) else {
-            return;
-        };
         let tween = Tween {
             duration: Duration::from_millis(fade_ms),
             ..Tween::default()
+        };
+        if let Some(handle) = self.streams.get_mut(&channel) {
+            let _ = if paused {
+                handle.pause(tween)
+            } else {
+                handle.resume(tween)
+            };
+            return;
+        }
+        let Some(handle) = self.channels.get_mut(&channel) else {
+            return;
         };
         if paused {
             let _ = handle.pause(tween);
@@ -307,6 +368,16 @@ impl AudioSystem {
     }
 
     pub fn set_channel_volume(&mut self, channel: i32, volume: f64, fade_ms: u64) {
+        if let Some(handle) = self.streams.get_mut(&channel) {
+            let _ = handle.set_volume(
+                volume.clamp(0.0, 1.0),
+                Tween {
+                    duration: Duration::from_millis(fade_ms),
+                    ..Tween::default()
+                },
+            );
+            return;
+        }
         let Some(handle) = self.channels.get_mut(&channel) else {
             return;
         };
@@ -320,6 +391,16 @@ impl AudioSystem {
     }
 
     pub fn set_channel_panning(&mut self, channel: i32, panning: f64, fade_ms: u64) {
+        if let Some(handle) = self.streams.get_mut(&channel) {
+            let _ = handle.set_panning(
+                panning.clamp(0.0, 1.0),
+                Tween {
+                    duration: Duration::from_millis(fade_ms),
+                    ..Tween::default()
+                },
+            );
+            return;
+        }
         let Some(handle) = self.channels.get_mut(&channel) else {
             return;
         };
@@ -333,6 +414,9 @@ impl AudioSystem {
     }
 
     pub fn channel_is_active(&self, channel: i32) -> bool {
+        if let Some(handle) = self.streams.get(&channel) {
+            return handle.state() != PlaybackState::Stopped;
+        }
         self.channels
             .get(&channel)
             .is_some_and(|handle| handle.state() != PlaybackState::Stopped)

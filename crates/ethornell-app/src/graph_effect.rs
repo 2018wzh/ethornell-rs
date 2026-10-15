@@ -4,9 +4,122 @@ use std::sync::Arc;
 use ethornell_image::DecodedImage;
 use na_mpeg2_decoder::{Decoder, Demuxer, Frame, Packet, StreamType, frame_to_rgba_bt601_limited};
 
+use crate::audio_runtime::{AudioCommand, StreamBytes};
+
+/// Audio channels for movie soundtracks: above the channels script sounds use.
+const MOVIE_AUDIO_CHANNEL_BASE: i32 = 0x4000_0000;
+
+pub(crate) fn movie_audio_channel(handle: i32) -> i32 {
+    MOVIE_AUDIO_CHANNEL_BASE.saturating_add(handle.max(0))
+}
+
+/// What a movie's soundtrack should be doing, for the audio frontend.
+#[derive(Debug, Clone)]
+pub(crate) struct MovieAudio {
+    pub(crate) handle: i32,
+    /// Changes whenever the soundtrack has to (re)start: invoke, seek, loop.
+    pub(crate) generation: u64,
+    pub(crate) active: bool,
+    pub(crate) paused: bool,
+    /// Native 0..=128 movie volume.
+    pub(crate) volume: i32,
+    /// The picture's position, where a (re)started soundtrack begins.
+    pub(crate) position_ms: i32,
+    pub(crate) bytes: StreamBytes,
+}
+
+/// A movie soundtrack's state as last sent to the audio frontend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MovieAudioSent {
+    generation: u64,
+    paused: bool,
+    volume: i32,
+}
+
+/// The audio commands that bring the frontend in line with the movies'
+/// soundtracks: start one when its movie starts, seeks or loops, pause and
+/// resume it and give it the movie's volume, stop it when the movie stops,
+/// ends or is closed. `sent` remembers what was sent last, per movie handle.
+pub(crate) fn movie_audio_commands(
+    movies: Vec<MovieAudio>,
+    sent: &mut BTreeMap<i32, MovieAudioSent>,
+) -> Vec<AudioCommand> {
+    let mut commands = Vec::new();
+    let mut present = Vec::with_capacity(movies.len());
+    for movie in movies {
+        present.push(movie.handle);
+        let channel = movie_audio_channel(movie.handle);
+        let volume = crate::native_audio_volume(movie.volume);
+        if !movie.active {
+            if sent.remove(&movie.handle).is_some() {
+                commands.push(AudioCommand::Stop {
+                    channel,
+                    fade_ms: 0,
+                });
+            }
+            continue;
+        }
+        match sent.get(&movie.handle) {
+            Some(last) if last.generation == movie.generation => {
+                if last.paused != movie.paused {
+                    commands.push(AudioCommand::Pause {
+                        channel,
+                        paused: movie.paused,
+                        fade_ms: 0,
+                    });
+                }
+                if last.volume != movie.volume {
+                    commands.push(AudioCommand::SetVolume {
+                        channel,
+                        volume,
+                        fade_ms: 0,
+                    });
+                }
+            }
+            _ => {
+                commands.push(AudioCommand::PlayStream {
+                    channel,
+                    bytes: movie.bytes.clone(),
+                    volume,
+                    start_ms: movie.position_ms.max(0) as u64,
+                });
+                if movie.paused {
+                    commands.push(AudioCommand::Pause {
+                        channel,
+                        paused: true,
+                        fade_ms: 0,
+                    });
+                }
+            }
+        }
+        sent.insert(
+            movie.handle,
+            MovieAudioSent {
+                generation: movie.generation,
+                paused: movie.paused,
+                volume: movie.volume,
+            },
+        );
+    }
+    sent.retain(|handle, _| {
+        let keep = present.contains(handle);
+        if !keep {
+            commands.push(AudioCommand::Stop {
+                channel: movie_audio_channel(*handle),
+                fade_ms: 0,
+            });
+        }
+        keep
+    });
+    commands
+}
+
 #[derive(Debug)]
 struct MovieDecoder {
     packets: Vec<Packet>,
+    /// The MPEG audio elementary stream (Layer II in BGI movies), played as
+    /// one stream by the audio frontend.
+    audio: Option<StreamBytes>,
     decoder: Decoder,
     pending_frames: VecDeque<Arc<Frame>>,
     packet_index: usize,
@@ -20,11 +133,15 @@ struct MovieDecoder {
 impl MovieDecoder {
     fn new(bytes: &[u8]) -> Option<Self> {
         let mut demuxer = Demuxer::new_auto();
-        let packets = demuxer
-            .push(bytes, None)
-            .into_iter()
-            .filter(|packet| packet.stream_type == StreamType::MpegVideo)
-            .collect::<Vec<_>>();
+        let mut packets = Vec::new();
+        let mut audio = Vec::new();
+        for packet in demuxer.push(bytes, None) {
+            match packet.stream_type {
+                StreamType::MpegVideo => packets.push(packet),
+                StreamType::MpegAudio => audio.extend_from_slice(&packet.data),
+                StreamType::Unknown => {}
+            }
+        }
         if packets.is_empty() {
             return None;
         }
@@ -34,6 +151,7 @@ impl MovieDecoder {
             .unwrap_or(25.0);
         Some(Self {
             packets,
+            audio: (!audio.is_empty()).then(|| StreamBytes(audio.into())),
             decoder: Decoder::new(),
             pending_frames: VecDeque::new(),
             packet_index: 0,
@@ -126,6 +244,7 @@ struct GraphEffectProcess {
     volume: i32,
     result: i32,
     movie: Option<MovieDecoder>,
+    audio_generation: u64,
 }
 
 #[derive(Debug, Default)]
@@ -160,6 +279,7 @@ impl GraphEffectRegistry {
                 volume: 128,
                 result: -1,
                 movie: None,
+                audio_generation: 0,
             },
         );
         0
@@ -193,6 +313,7 @@ impl GraphEffectRegistry {
                 volume: 128,
                 result: -1,
                 movie: Some(movie),
+                audio_generation: 0,
             },
         );
         0
@@ -222,6 +343,7 @@ impl GraphEffectRegistry {
                 volume: 128,
                 result: -1,
                 movie: None,
+                audio_generation: 0,
             },
         );
         0
@@ -250,6 +372,7 @@ impl GraphEffectRegistry {
                 volume: 128,
                 result: -1,
                 movie: None,
+                audio_generation: 0,
             },
         );
         0
@@ -266,6 +389,7 @@ impl GraphEffectRegistry {
         process.paused = false;
         process.position_ms = 0;
         process.result = -1;
+        process.audio_generation += 1;
         if let Some(movie) = process.movie.as_mut() {
             movie.reset();
         }
@@ -303,6 +427,7 @@ impl GraphEffectRegistry {
         }
         let position_ms = position_ms.max(0).min(process.duration_ms.max(0));
         process.position_ms = position_ms;
+        process.audio_generation += 1;
         if let Some(movie) = process.movie.as_mut() {
             let _ = movie.frame_at(position_ms);
         }
@@ -401,6 +526,9 @@ impl GraphEffectRegistry {
                 if process.looping {
                     process.position_ms = 0;
                     process.result = -1;
+                    // Restart the soundtrack with the picture rather than
+                    // looping it on its own, so the two can't drift apart.
+                    process.audio_generation += 1;
                     if let Some(movie) = process.movie.as_mut() {
                         movie.reset();
                     }
@@ -411,6 +539,24 @@ impl GraphEffectRegistry {
             }
         }
         updates
+    }
+
+    pub(crate) fn movie_audio(&self) -> Vec<MovieAudio> {
+        self.processes
+            .iter()
+            .filter_map(|(&handle, process)| {
+                let bytes = process.movie.as_ref()?.audio.clone()?;
+                Some(MovieAudio {
+                    handle,
+                    generation: process.audio_generation,
+                    active: process.active,
+                    paused: process.paused,
+                    volume: process.volume,
+                    position_ms: process.position_ms,
+                    bytes,
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn release(&mut self, handle: i32) -> i32 {
@@ -563,6 +709,104 @@ mod tests {
         let mut registry = GraphEffectRegistry::default();
         assert_eq!(registry.configure_rect(7, 0x1234, [10, 20, 30]), 0);
         assert_eq!(registry.parameters(7), Some([0x1234, 10, 20, 30]));
+    }
+
+    /// A minimal MPEG-1 program stream: a video packet (a sequence header)
+    /// and two audio packets, none with a time stamp.
+    fn tiny_movie() -> Vec<u8> {
+        let mut stream = vec![0, 0, 1, 0xBA, 0x21, 0, 1, 0, 1, 0x80, 0, 1];
+        let packets: [(u8, &[u8]); 3] = [
+            (0xE0, &[0, 0, 1, 0xB3, 0x14, 0x00, 0xF0, 0x13]),
+            (0xC0, b"first"),
+            (0xC0, b"second"),
+        ];
+        for (id, payload) in packets {
+            stream.extend_from_slice(&[0, 0, 1, id]);
+            stream.extend_from_slice(&(payload.len() as u16 + 1).to_be_bytes());
+            stream.push(0x0F);
+            stream.extend_from_slice(payload);
+        }
+        stream.extend_from_slice(&[0, 0, 1, 0xB9]);
+        stream
+    }
+
+    fn command_labels(commands: Vec<AudioCommand>) -> Vec<&'static str> {
+        commands
+            .into_iter()
+            .map(|command| match command {
+                AudioCommand::PlayStream { .. } => "play",
+                AudioCommand::Pause { paused: true, .. } => "pause",
+                AudioCommand::Pause { paused: false, .. } => "resume",
+                AudioCommand::SetVolume { .. } => "volume",
+                AudioCommand::Stop { .. } => "stop",
+                _ => "other",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn movie_soundtrack_is_kept_and_restarts_with_the_movie() {
+        let mut registry = GraphEffectRegistry::default();
+        assert_eq!(
+            registry.configure_media(5, "a".into(), "m".into(), &tiny_movie()),
+            0
+        );
+        let audio = registry.movie_audio();
+        assert_eq!(audio.len(), 1);
+        assert_eq!(&*audio[0].bytes.0, b"firstsecond");
+        assert!(!audio[0].active);
+
+        registry.invoke(5);
+        let started = registry.movie_audio()[0].generation;
+        assert_eq!(registry.seek(5, 0), 0);
+        let sought = &registry.movie_audio()[0];
+        assert!(sought.active);
+        assert!(sought.generation > started);
+        assert_eq!(sought.position_ms, 0);
+    }
+
+    #[test]
+    fn movie_audio_commands_follow_the_movie() {
+        let mut registry = GraphEffectRegistry::default();
+        registry.configure_media(5, "a".into(), "m".into(), &tiny_movie());
+        let mut sent = BTreeMap::new();
+        let mut step = |registry: &GraphEffectRegistry| {
+            command_labels(movie_audio_commands(registry.movie_audio(), &mut sent))
+        };
+
+        assert!(
+            step(&registry).is_empty(),
+            "nothing plays before the movie starts"
+        );
+        registry.invoke(5);
+        assert_eq!(step(&registry), ["play"]);
+        assert!(
+            step(&registry).is_empty(),
+            "no command while nothing changes"
+        );
+        registry.set_paused(5, true);
+        assert_eq!(step(&registry), ["pause"]);
+        registry.set_paused(5, false);
+        assert_eq!(step(&registry), ["resume"]);
+        assert_eq!(registry.set_volume(5, 64), 0);
+        assert_eq!(step(&registry), ["volume"]);
+        registry.invoke(5);
+        assert_eq!(
+            step(&registry),
+            ["play"],
+            "starting again restarts the soundtrack"
+        );
+        assert_eq!(registry.cancel(5), 0);
+        assert_eq!(step(&registry), ["stop"]);
+        registry.invoke(5);
+        assert_eq!(step(&registry), ["play"]);
+        assert_eq!(registry.close_movie_slot(5), 0);
+        assert_eq!(
+            step(&registry),
+            ["stop"],
+            "closing the movie stops its soundtrack"
+        );
+        assert!(step(&registry).is_empty());
     }
 
     #[test]

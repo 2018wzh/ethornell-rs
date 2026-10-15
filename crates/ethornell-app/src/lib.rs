@@ -654,6 +654,8 @@ struct RuntimeTraceApi {
     /// actual decoded track assets rather than an inert unsupported stub.
     native_cd_audio: NativeCdAudioState,
     audio_requests: VecDeque<AudioCommand>,
+    /// Movie soundtracks as last sent to the audio frontend, by movie handle.
+    movie_audio_sent: BTreeMap<i32, graph_effect::MovieAudioSent>,
     program_cache: HashMap<String, ethornell_script::BpProgram>,
     file_exists_cache: HashMap<String, bool>,
     file_size_cache: HashMap<String, i32>,
@@ -981,6 +983,7 @@ impl RuntimeTraceApi {
             sound_playback_clocks: [NativeAudioClock::default(); 64],
             native_cd_audio: NativeCdAudioState::default(),
             audio_requests: VecDeque::new(),
+            movie_audio_sent: BTreeMap::new(),
             program_cache: HashMap::new(),
             file_exists_cache: HashMap::new(),
             file_size_cache: HashMap::new(),
@@ -5363,6 +5366,14 @@ impl RuntimeTraceApi {
         }
     }
 
+    fn sync_movie_audio(&mut self) {
+        let commands = graph_effect::movie_audio_commands(
+            self.graph_effects.movie_audio(),
+            &mut self.movie_audio_sent,
+        );
+        self.audio_requests.extend(commands);
+    }
+
     fn tick_timelines(&mut self, elapsed_ms: u64) {
         self.graph_flash_controls.tick(elapsed_ms);
         self.tick_native_user_state(elapsed_ms);
@@ -5371,6 +5382,7 @@ impl RuntimeTraceApi {
         for update in self.graph_effects.tick_movies(movie_elapsed_ms) {
             self.store_movie_frame(update);
         }
+        self.sync_movie_audio();
         self.drain_graph_input_messages();
         // Target sub_496430 samples each registered Sprite once per main-loop
         // pass and stores only bit zero of the primary-input query. The portable
