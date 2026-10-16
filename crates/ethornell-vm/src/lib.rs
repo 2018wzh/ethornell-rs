@@ -10968,16 +10968,32 @@ impl Vm {
                 continue;
             };
             let original = self.stack[index].clone();
-            let encoding = if matches!(
+            let text_slot = matches!(
                 (group, id),
                 (0x90, 0x90)
                     | (0x91, 0x91 | 0x93 | 0x9C | 0x9D)
                     | (0x92, 0x1C | 0x1D | 0x1E | 0x1F | 0x90 | 0x91 | 0x9C)
-            ) {
+            );
+            let encoding = if text_slot {
                 self.graph_text_encoding.unwrap_or(encoding_rs::SHIFT_JIS)
             } else {
                 encoding_rs::SHIFT_JIS
             };
+            // A text slot holds a `char *`, not a descriptor: an integer
+            // addressing an empty string is empty text. Searching around it
+            // picks up unrelated strings (Wonderful Everyday showed the tail
+            // of a sprite name for lines whose text part was empty).
+            if text_slot
+                && let Value::Int(value) = original
+                && value != 0
+                && self
+                    .read_c_string_bytes(value as u32)
+                    .is_ok_and(|bytes| bytes.is_empty())
+                && self.shadow_string_at(value as u32).is_none()
+            {
+                self.replace_stack_value(index, Value::Str(String::new()));
+                continue;
+            }
             // sub_48DF50 turns a script pointer into a native `char *`; it does
             // not look for a string elsewhere. Only untyped integers keep the
             // descriptor fallback.
@@ -15302,6 +15318,26 @@ mod tests {
 
         assert_eq!(vm.stack[primary_index], Value::Str(String::new()));
         assert_eq!(vm.stack[auxiliary_index], Value::Str("a line".into()));
+    }
+
+    #[test]
+    fn message_text_integer_address_of_an_empty_string_is_not_searched_around() {
+        let mut vm = Vm::new();
+        // scrmsg passes a line's text as `pointer + 1`, an integer; some
+        // lines have an empty text part. A sprite name 16 bytes on is in
+        // reach of the descriptor search, which used to return it.
+        let text = 0x1200_3000_u32;
+        let neighbour = text + 16;
+        vm.write_c_string(text, "").unwrap();
+        vm.write_c_string(neighbour, "ev0005a_l").unwrap();
+        vm.write_int(text + 4, 2, neighbour + 3).unwrap();
+        vm.stack.extend((0..15).map(Value::Int));
+        let text_index = vm.stack.len() - 1 - 13;
+        vm.stack[text_index] = Value::Int(text as i32);
+
+        vm.normalize_graph_string_args(0x92, 0x90).unwrap();
+
+        assert_eq!(vm.stack[text_index], Value::Str(String::new()));
     }
 
     #[test]
