@@ -1,0 +1,18 @@
+[package]
+name = "astra-emu-ethornell"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+diagnostic-bridge = ["astra-emu-abi/diagnostic-bridge"]
+
+[dependencies]
+astra-emu-abi = { path = "../../../../Source/FamilyApi/astra-emu-abi" }
+ethornell-app = { path = "../ethornell-app" }
+ethornell-archive = { path = "../ethornell-archive" }
+tracing.workspace = true

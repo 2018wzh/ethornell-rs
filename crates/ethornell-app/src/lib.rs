@@ -14,6 +14,8 @@ mod auto_input;
 mod bitmap_blend;
 mod character_image;
 mod debug_trace;
+mod composition;
+pub mod embedded;
 mod display_tree;
 mod effects;
 mod graph;

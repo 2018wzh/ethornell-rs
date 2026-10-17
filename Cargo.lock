@@ -241,6 +241,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-emu-abi"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "astra-emu-ethornell"
+version = "0.1.0"
+dependencies = [
+ "astra-emu-abi",
+ "ethornell-app",
+ "ethornell-archive",
+ "tracing",
+]
+
+[[package]]
 name = "async-channel"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

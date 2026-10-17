@@ -133,6 +133,23 @@ impl AudioSystem {
         })
     }
 
+    /// Suspend only playing channels, preserving script-owned pause state.
+    pub fn suspend_playing(&mut self) -> Vec<i32> {
+        let mut channels = Vec::new();
+        for (&channel, handle) in &self.channels {
+            if handle.state() == PlaybackState::Playing { channels.push(channel); }
+        }
+        for (&channel, handle) in &self.streams {
+            if handle.state() == PlaybackState::Playing { channels.push(channel); }
+        }
+        for &channel in &channels { self.pause_channel(channel, true, 0); }
+        channels
+    }
+
+    pub fn resume_suspended(&mut self, channels: &[i32]) {
+        for &channel in channels { self.pause_channel(channel, false, 0); }
+    }
+
     pub fn play_ogg_file(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let data = StaticSoundData::from_file(path, StaticSoundSettings::default())
             .map_err(|err| EthornellError::Other(format!("load audio failed: {err}")))?;

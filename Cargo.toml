@@ -8,6 +8,7 @@ members = [
   "crates/ethornell-render",
   "crates/ethornell-audio",
   "crates/ethornell-app",
+  "crates/astra-emu-ethornell",
   "crates/ethornell-cli",
   "crates/na_mpeg2_decoder",
   "crates/na_wmv_player",
