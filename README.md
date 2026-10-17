@@ -37,6 +37,8 @@ composition. Embedded rendering reads the final offscreen GPU target; it does
 not create a window or present.
 
 The ABI exports `astra_emu_query`; static registration uses `QUERY`.
+The descriptor and probe share the format identifier `bgi-bp-arc`. This is a
+machine-readable ABI symbol, not a display label with spaces or slashes.
 `diagnostic-bridge` is for dynamically loaded modules. Static builds reuse the
 host tracing subscriber. Startup-only configuration fields are `trace` and
 `fail_on_stub`; no text/resource hooks or live configuration are advertised.
@@ -57,7 +59,7 @@ mode because the host has no cancellable service for them; message, text and
 bounded item dialogs use the typed host modal service.
 
 Dependencies are exact git revisions: `astra-emu-abi` from
-`2018wzh/AstraEngine@94cd66ee9051d3643f51f4a61fed0466bf320280`, and Kira 0.8.7
+`2018wzh/AstraEngine@15a39a626b1316cb6137a75e17e14a2ff2d1ba88` (C ABI 2), and Kira 0.8.7
 from `2018wzh/kira@da8668fcd5e543eec2e9ea9871b310276e09fdc5`. The Kira fix
 is separate from the adapter, based on upstream
 `f46857e121872416fba0d539ff3d59aa99876fb8`, retaining its MIT/Apache-2.0 files.

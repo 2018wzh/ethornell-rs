@@ -19,7 +19,7 @@ const fn boolean(id: &'static str, label: &'static str) -> ConfigField {
 static SCHEMA: Schema = Schema([boolean("trace", "Trace native VM"), boolean("fail_on_stub", "Stop on unsupported native calls")]);
 struct Formats([Bytes; 1]);
 unsafe impl Sync for Formats {}
-static FORMATS: Formats = Formats([bytes("BGI BP / ARC")]);
+static FORMATS: Formats = Formats([bytes("bgi-bp-arc")]);
 
 #[derive(Clone, Copy)]
 struct Services { host: HostServices, epoch: u64 }
