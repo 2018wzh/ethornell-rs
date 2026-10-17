@@ -256,13 +256,14 @@ impl Embedded {
         let mut host = self.host.borrow_mut();
         let mut actual_size = None;
         let mut actual_fullscreen = None;
+        let pending_title = api.pending_window_title.take();
         let mut command = |request| -> Result<()> {
             let feedback = host.command(request).map_err(EthornellError::Other)?;
             if feedback.size.is_some() { actual_size = feedback.size; }
             if feedback.fullscreen.is_some() { actual_fullscreen = feedback.fullscreen; }
             Ok(())
         };
-        if let Some(title) = api.pending_window_title.take() { command(WindowCommand::Title(&title))?; }
+        if let Some(title) = pending_title.as_ref() { command(WindowCommand::Title(title))?; }
         if let Some(value) = api.pending_fullscreen.take() { command(WindowCommand::Fullscreen(value))?; }
         if let Some((width, height)) = api.pending_window_size.take() { command(WindowCommand::Size(width, height))?; }
         if let Some((x, y)) = api.pending_window_position.take() { command(WindowCommand::Position(x, y))?; }

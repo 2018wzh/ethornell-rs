@@ -243,7 +243,7 @@ dependencies = [
 [[package]]
 name = "astra-emu-abi"
 version = "0.1.0"
-source = "git+https://github.com/2018wzh/AstraEngine.git?rev=94cd66ee9051d3643f51f4a61fed0466bf320280#94cd66ee9051d3643f51f4a61fed0466bf320280"
+source = "git+https://github.com/2018wzh/AstraEngine.git?rev=15a39a626b1316cb6137a75e17e14a2ff2d1ba88#15a39a626b1316cb6137a75e17e14a2ff2d1ba88"
 dependencies = [
  "tracing",
  "tracing-log",

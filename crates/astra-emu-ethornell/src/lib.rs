@@ -366,7 +366,7 @@ unsafe extern "C" fn state(session: Session, output: *mut SessionState, error: *
         let state = handle.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         let mut detail = Error::default();
         if let Some((_, message)) = &state.failure { detail.set("ethornell.native", message); }
-        unsafe { *output = SessionState { state: state.status, reserved: 0, context_epoch: 1, output_epoch: state.output, error: detail }; }
+        unsafe { *output = SessionState { state: state.status, flags: 0, context_epoch: 1, output_epoch: state.output, error: detail }; }
         Ok(())
     })
 }

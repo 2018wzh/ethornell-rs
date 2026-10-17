@@ -12,7 +12,7 @@ default = []
 diagnostic-bridge = ["astra-emu-abi/diagnostic-bridge"]
 
 [dependencies]
-astra-emu-abi = { git = "https://github.com/2018wzh/AstraEngine.git", rev = "94cd66ee9051d3643f51f4a61fed0466bf320280" }
+astra-emu-abi = { git = "https://github.com/2018wzh/AstraEngine.git", rev = "15a39a626b1316cb6137a75e17e14a2ff2d1ba88" }
 ethornell-app = { path = "../ethornell-app" }
 ethornell-archive = { path = "../ethornell-archive" }
 tracing.workspace = true
