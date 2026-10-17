@@ -10,3 +10,6 @@ workspace = true
 ethornell-core = { path = "../ethornell-core" }
 kira.workspace = true
 serde.workspace = true
+# Not used directly: enables Symphonia's MPEG-1/2 Layer II decoder for kira,
+# whose own features stop at MP3. BGI movies carry Layer II soundtracks.
+symphonia = { version = "0.5.5", default-features = false, features = ["mp2"] }
