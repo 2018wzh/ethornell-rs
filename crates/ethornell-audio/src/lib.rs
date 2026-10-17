@@ -4,7 +4,7 @@ use kira::manager::{AudioManager, AudioManagerSettings};
 use kira::sound::{
     FromFileError, PlaybackPosition, PlaybackState,
     static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings},
-    streaming::{StreamingSoundData, StreamingSoundHandle, StreamingSoundSettings},
+    streaming::{DecoderOwner, StreamingSoundData, StreamingSoundHandle, StreamingSoundSettings},
 };
 use kira::tween::Tween;
 use serde::Serialize;
@@ -111,7 +111,8 @@ fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
 }
 
 pub struct AudioSystem {
-    manager: AudioManager,
+    manager: Option<AudioManager>,
+    decoder_owner: DecoderOwner,
     volume: f64,
     channels: BTreeMap<i32, StaticSoundHandle>,
     /// Channels playing a sound that is decoded while it plays (movie
@@ -125,7 +126,8 @@ impl AudioSystem {
         let manager = AudioManager::new(AudioManagerSettings::default())
             .map_err(|err| EthornellError::Other(format!("audio init failed: {err}")))?;
         Ok(Self {
-            manager,
+            manager: Some(manager),
+            decoder_owner: DecoderOwner::new(),
             volume: 1.0,
             channels: BTreeMap::new(),
             streams: BTreeMap::new(),
@@ -150,10 +152,19 @@ impl AudioSystem {
         for &channel in channels { self.pause_channel(channel, false, 0); }
     }
 
+    /// Quiesce the device callback/watcher before joining streaming decoders.
+    pub fn shutdown(&mut self) -> Result<()> {
+        self.stop_all();
+        drop(self.manager.take());
+        self.decoder_owner.stop_and_join()
+            .map_err(|_| EthornellError::Other("audio decoder thread panicked".into()))
+    }
+
     pub fn play_ogg_file(&mut self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let data = StaticSoundData::from_file(path, StaticSoundSettings::default())
             .map_err(|err| EthornellError::Other(format!("load audio failed: {err}")))?;
         self.manager
+            .as_mut().ok_or_else(|| EthornellError::Other("audio backend is closed".into()))?
             .play(data)
             .map_err(|err| EthornellError::Other(format!("play audio failed: {err}")))?;
         Ok(())
@@ -289,6 +300,7 @@ impl AudioSystem {
     fn start_static_sound(&mut self, channel: i32, data: StaticSoundData) -> Result<bool> {
         let handle = self
             .manager
+            .as_mut().ok_or_else(|| EthornellError::Other("audio backend is closed".into()))?
             .play(data)
             .map_err(|err| EthornellError::Other(format!("play audio bytes failed: {err}")))?;
         if let Some(mut previous) = self.channels.insert(channel, handle) {
@@ -322,7 +334,8 @@ impl AudioSystem {
             .map_err(|err| EthornellError::Other(format!("load audio stream failed: {err}")))?;
         let handle = self
             .manager
-            .play(data)
+            .as_mut().ok_or_else(|| EthornellError::Other("audio backend is closed".into()))?
+            .play(data.with_decoder_owner(&mut self.decoder_owner))
             .map_err(|err| EthornellError::Other(format!("play audio stream failed: {err}")))?;
         if let Some(mut previous) = self.channels.remove(&channel) {
             let _ = previous.stop(Tween::default());
@@ -492,4 +505,10 @@ fn apply_decode_gain(data: &mut StaticSoundData, decode_gain: f64) {
         })
         .collect::<Vec<_>>()
         .into();
+}
+
+impl Drop for AudioSystem {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
 }

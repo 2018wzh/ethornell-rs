@@ -211,7 +211,7 @@ fn run(root: PathBuf, trace: bool, fail_on_stub: bool, window: WindowState, serv
                 Command::Wake => {}
             }
         }
-        Ok(())
+        engine.shutdown().map_err(|error| error.to_string())
     }));
     match result {
         Ok(Ok(())) => { let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner()); state.status = SESSION_FINISHED; }

@@ -37,8 +37,11 @@ byteorder = "1"
 encoding_rs = "0.8"
 wgpu = "0.19"
 winit = "0.31.0-beta.3"
-kira = "0.8"
+kira = { git = "https://github.com/2018wzh/kira.git", rev = "da8668fcd5e543eec2e9ea9871b310276e09fdc5" }
 pollster = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
 bytemuck = { version = "1", features = ["derive"] }
 ab_glyph = "0.2"
+
+[patch.crates-io]
+cpal = { git = "https://github.com/2018wzh/cpal.git", rev = "65ac8a6ac1a635cc26bfc5af331295b052044908" }

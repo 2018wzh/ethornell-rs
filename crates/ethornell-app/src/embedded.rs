@@ -146,6 +146,7 @@ impl Embedded {
     pub fn dimensions(&self) -> (u32, u32) { self.renderer.surface_size() }
     pub fn is_paused(&self) -> bool { self.paused || self.suspended }
     pub fn is_finished(&self) -> bool { self.runtime.api.quit_requested }
+    pub fn shutdown(&mut self) -> Result<()> { self.audio.shutdown() }
 
     fn set_pause_state(&mut self, paused: bool, suspended: bool) {
         let before = self.is_paused();
@@ -280,7 +281,9 @@ impl Embedded {
 
 impl Drop for Embedded {
     fn drop(&mut self) {
-        self.audio.stop_all();
+        if let Err(error) = self.audio.shutdown() {
+            tracing::error!(%error, "native audio shutdown failed after joining workers");
+        }
         DIALOG.with(|slot| *slot.borrow_mut() = None);
     }
 }

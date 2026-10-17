@@ -56,8 +56,23 @@ requests and desktop-wallpaper changes currently fail explicitly in embedded
 mode because the host has no cancellable service for them; message, text and
 bounded item dialogs use the typed host modal service.
 
-Build commands from this directory (the ABI dependency must exist at
-`../../Source/FamilyApi/astra-emu-abi`):
+Dependencies are exact git revisions: `astra-emu-abi` from
+`2018wzh/AstraEngine@94cd66ee9051d3643f51f4a61fed0466bf320280`, and Kira 0.8.7
+from `2018wzh/kira@da8668fcd5e543eec2e9ea9871b310276e09fdc5`. The Kira fix
+is separate from the adapter, based on upstream
+`f46857e121872416fba0d539ff3d59aa99876fb8`, retaining its MIT/Apache-2.0 files.
+It joins the desktop device watcher and adds an explicit gameplay-thread
+decoder owner. Native audio shutdown drops the manager/device first, then
+cancels and joins all registered movie-audio decoders. No joins run in the
+realtime callback and dropping a playback handle still leaves playback alone.
+The root patches CPAL 0.15.3 to
+`2018wzh/cpal@65ac8a6ac1a635cc26bfc5af331295b052044908` (upstream
+`ac6cbb2ba55e61665a35ab88ae136a83380d1354`, original Apache-2.0 license).
+Its WASAPI stream destructor also joins when the Terminate channel is already
+disconnected. Integrating workspaces must repeat this root-level patch because
+Cargo ignores dependency-local patches.
+
+Build commands from this directory:
 
 ```sh
 cargo build -p astra-emu-ethornell --features diagnostic-bridge --target-dir target/dynamic
