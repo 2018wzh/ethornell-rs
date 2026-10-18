@@ -1,6 +1,6 @@
 //! Thin C ABI adapter. BGI scheduling, composition, audio and save remain native.
 use astra_emu_abi::*;
-use ethornell_app::embedded::{Embedded, Frame, HostWindow, Input, WindowCommand, WindowFeedback, FRAME_INTERVAL};
+use ethornell_app::embedded::{Embedded, Frame, HostWindow, Input, WindowCommand, WindowError, WindowFeedback, FRAME_INTERVAL};
 use std::{cell::RefCell, ffi::c_void, panic::{catch_unwind, AssertUnwindSafe}, path::PathBuf, ptr,
     rc::Rc, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc::{self, Receiver, SyncSender}},
     thread::{self, JoinHandle}, time::Instant};
@@ -38,14 +38,21 @@ impl Services {
         }
     }
 }
+fn window_request_error(status: Status, message: String) -> WindowError {
+    match status {
+        CANCELLED | STALE_CONTEXT => WindowError::Interrupted(message),
+        CORE_ERROR | UNSUPPORTED => WindowError::Operation(message),
+        _ => WindowError::Protocol(message),
+    }
+}
 struct Host {
     services: Services,
     cancelled: Arc<AtomicBool>,
     next_request: u64,
 }
 impl Host {
-    fn request(&mut self, mut request: WindowRequest, input: &mut [u8]) -> Result<Option<WindowResult>, String> {
-        if self.cancelled() { return Err("session cancelled".into()); }
+    fn request(&mut self, mut request: WindowRequest, input: &mut [u8]) -> Result<Option<WindowResult>, WindowError> {
+        if self.cancelled() { return Err(WindowError::Interrupted("session cancelled".into())); }
         let callback = self.services.host.window.request.ok_or("native window service is unavailable")?;
         self.next_request = self.next_request.checked_add(1).ok_or("window request identity exhausted")?;
         request.request_id = self.next_request;
@@ -54,14 +61,15 @@ impl Host {
             input: TextBuffer { data, capacity: input.len(), len: 0 }, visible: 0, minimized: 0 };
         let mut error = Error::default();
         let status = unsafe { callback(self.services.host.window.context, &request, &mut result, &mut error) };
-        if status == CANCELLED && !self.cancelled() { return Ok(None); }
+        if status == CANCELLED && request.kind == WINDOW_MODAL && !self.cancelled() { return Ok(None); }
         if status != OK {
-            return Err(format!(
+            let message = format!(
                 "native window operation {} flags {} at ({}, {}) service status {status}: {}: {}",
                 request.kind, request.flags, request.x, request.y,
                 String::from_utf8_lossy(&error.code[..(error.code_len as usize).min(error.code.len())]),
                 String::from_utf8_lossy(&error.message[..(error.message_len as usize).min(error.message.len())]),
-            ));
+            );
+            return Err(if self.cancelled() { WindowError::Interrupted(message) } else { window_request_error(status, message) });
         }
         if result.reserved != 0 || result.input.data != data || result.input.capacity != input.len() || result.input.len > input.len() {
             return Err("invalid native window result".into());
@@ -76,7 +84,7 @@ impl Host {
 }
 impl HostWindow for Host {
     fn cancelled(&self) -> bool { self.cancelled.load(Ordering::Acquire) || self.services.cancelled() }
-    fn command(&mut self, command: WindowCommand<'_>) -> Result<WindowFeedback, String> {
+    fn command(&mut self, command: WindowCommand<'_>) -> Result<WindowFeedback, WindowError> {
         let mut request = self.base(0);
         let mut required = 0;
         match command {
@@ -91,7 +99,7 @@ impl HostWindow for Host {
             WindowCommand::Minimized(minimized) => { request.kind = WINDOW_MINIMIZED; request.flags = u32::from(minimized); required = WINDOW_RESULT_MINIMIZED; }
         }
         if request.text.len > 4096 { return Err("native window title exceeds ABI bound".into()); }
-        let result = self.request(request, &mut [])?.ok_or("native window request cancelled")?;
+        let result = self.request(request, &mut [])?.ok_or_else(|| WindowError::Interrupted("native window request cancelled".into()))?;
         if result.valid_fields & required != required { return Err("host omitted actual native window result".into()); }
         if (result.valid_fields & WINDOW_RESULT_VISIBILITY != 0 && result.visible > 1)
             || (result.valid_fields & WINDOW_RESULT_MINIMIZED != 0 && result.minimized > 1) {
@@ -113,7 +121,7 @@ impl HostWindow for Host {
         if !default_first && labels.len() == 2 { buttons.swap(0, 1); }
         let mut request = self.base(WINDOW_MODAL);
         request.text = Bytes::new(text.as_bytes()); request.caption = Bytes::new(title.as_bytes()); request.buttons = buttons.as_ptr(); request.button_count = labels.len();
-        let Some(result) = self.request(request, &mut [])? else { return Ok(None); };
+        let Some(result) = self.request(request, &mut []).map_err(WindowError::into_message)? else { return Ok(None); };
         if result.valid_fields & WINDOW_RESULT_MODAL == 0 || !buttons[..labels.len()].iter().any(|b| b.id == result.selected_button) {
             return Err("host returned no valid native modal selection".into());
         }
@@ -127,7 +135,7 @@ impl HostWindow for Host {
         request.caption = Bytes::new(title.as_bytes()); request.text = Bytes::new(prompt.as_bytes()); request.initial_text = Bytes::new(initial.as_bytes());
         request.buttons = buttons.as_ptr(); request.button_count = buttons.len();
         let mut input = vec![0; MAX_MODAL_TEXT];
-        let Some(result) = self.request(request, &mut input)? else { return Ok(None); };
+        let Some(result) = self.request(request, &mut input).map_err(WindowError::into_message)? else { return Ok(None); };
         if result.valid_fields & WINDOW_RESULT_MODAL == 0 { return Err("host omitted text input result".into()); }
         match result.selected_button {
             1 => { input.truncate(result.input.len); String::from_utf8(input).map(Some).map_err(|e| e.to_string()) }
@@ -143,7 +151,7 @@ impl HostWindow for Host {
         let buttons: Vec<_> = options.iter().enumerate().map(|(index, label)| WindowButton { id: index as u32 + 1, reserved: 0, label: Bytes::new(label.as_bytes()) }).collect();
         let mut request = self.base(WINDOW_MODAL);
         request.caption = Bytes::new(title.as_bytes()); request.text = Bytes::new(prompt.as_bytes()); request.buttons = buttons.as_ptr(); request.button_count = buttons.len();
-        let Some(result) = self.request(request, &mut [])? else { return Ok(None); };
+        let Some(result) = self.request(request, &mut []).map_err(WindowError::into_message)? else { return Ok(None); };
         if result.valid_fields & WINDOW_RESULT_MODAL == 0 { return Err("host omitted selection result".into()); }
         result.selected_button.checked_sub(1).and_then(|index| options.get(index as usize)).cloned().map(Some).ok_or_else(|| "host returned invalid native item selection".into())
     }
@@ -429,3 +437,25 @@ pub unsafe extern "C" fn astra_emu_query(version: u32, output: *mut *const CoreA
     OK
 }
 pub const QUERY: Query = astra_emu_query;
+
+#[cfg(test)]
+mod window_error_tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_and_stale_statuses_preserve_interruption() {
+        for status in [CANCELLED, STALE_CONTEXT] {
+            assert!(matches!(window_request_error(status, "interrupted".into()), WindowError::Interrupted(_)));
+        }
+    }
+
+    #[test]
+    fn only_host_operation_failures_are_best_effort_candidates() {
+        for status in [CORE_ERROR, UNSUPPORTED] {
+            assert!(matches!(window_request_error(status, "host failed".into()), WindowError::Operation(_)));
+        }
+        for status in [INVALID_ARGUMENT, INVALID_STATE, PANICKED, CAPACITY] {
+            assert!(matches!(window_request_error(status, "protocol failed".into()), WindowError::Protocol(_)));
+        }
+    }
+}

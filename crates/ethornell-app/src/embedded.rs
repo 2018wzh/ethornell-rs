@@ -16,6 +16,25 @@ pub enum WindowCommand<'a> {
     Visible(bool),
     Minimized(bool),
 }
+#[derive(Debug)]
+pub enum WindowError {
+    Operation(String),
+    Interrupted(String),
+    Protocol(String),
+}
+impl WindowError {
+    pub fn into_message(self) -> String {
+        match self {
+            Self::Operation(message) | Self::Interrupted(message) | Self::Protocol(message) => message,
+        }
+    }
+}
+impl From<&str> for WindowError {
+    fn from(message: &str) -> Self { Self::Protocol(message.to_owned()) }
+}
+impl From<String> for WindowError {
+    fn from(message: String) -> Self { Self::Protocol(message) }
+}
 
 
 #[derive(Default)]
@@ -24,11 +43,23 @@ pub struct WindowFeedback {
     pub fullscreen: Option<bool>,
 }
 pub trait HostWindow {
-    fn command(&mut self, command: WindowCommand<'_>) -> std::result::Result<WindowFeedback, String>;
+    fn command(&mut self, command: WindowCommand<'_>) -> std::result::Result<WindowFeedback, WindowError>;
     fn message(&mut self, kind: u32, title: &str, text: &str, default_first: bool) -> std::result::Result<Option<bool>, String>;
     fn prompt(&mut self, title: &str, prompt: &str, initial: &str) -> std::result::Result<Option<String>, String>;
     fn choose(&mut self, title: &str, prompt: &str, options: &[String]) -> std::result::Result<Option<String>, String>;
     fn cancelled(&self) -> bool;
+}
+
+fn handle_window_failure(cursor: Option<(i32, i32)>, cancelled: bool, error: WindowError) -> Result<()> {
+    match (cursor, cancelled, error) {
+        (Some((x, y)), false, WindowError::Operation(error)) => {
+            // Fixed upstream window.rs:389-397 treats this native void operation
+            // as best effort. Preserve the real failure; do not invent feedback.
+            tracing::warn!(%error, x, y, "failed to apply target cursor motion to host cursor");
+            Ok(())
+        }
+        (_, _, error) => Err(EthornellError::Other(error.into_message())),
+    }
 }
 
 struct DialogBridge {
@@ -129,13 +160,13 @@ impl Embedded {
         check_cancelled()?;
         let audio = AudioSystem::new()?;
         check_cancelled()?;
-        host.borrow_mut().command(WindowCommand::Title("ethornell-rs runtime")).map_err(EthornellError::Other)?;
+        host.borrow_mut().command(WindowCommand::Title("ethornell-rs runtime")).map_err(|error| EthornellError::Other(error.into_message()))?;
         if let Some(icon) = crate::window_icon::load(&runtime.api.native_root) {
             let icon = if icon.width() > 256 || icon.height() > 256 {
                 image::imageops::thumbnail(&icon, 256, 256)
             } else { icon };
             host.borrow_mut().command(WindowCommand::Icon { width: icon.width(), height: icon.height(), rgba: icon.as_raw() })
-                .map_err(EthornellError::Other)?;
+                .map_err(|error| EthornellError::Other(error.into_message()))?;
         }
         check_cancelled()?;
         DIALOG.with(|slot| *slot.borrow_mut() = Some(DialogBridge { host: host.clone(), error: None }));
@@ -258,7 +289,14 @@ impl Embedded {
         let mut actual_fullscreen = None;
         let pending_title = api.pending_window_title.take();
         let mut command = |request| -> Result<()> {
-            let feedback = host.command(request).map_err(EthornellError::Other)?;
+            let cursor = match &request {
+                WindowCommand::CursorPosition(x, y) => Some((*x, *y)),
+                _ => None,
+            };
+            let feedback = match host.command(request) {
+                Ok(feedback) => feedback,
+                Err(error) => return handle_window_failure(cursor, host.cancelled(), error),
+            };
             if feedback.size.is_some() { actual_size = feedback.size; }
             if feedback.fullscreen.is_some() { actual_fullscreen = feedback.fullscreen; }
             Ok(())
@@ -298,4 +336,33 @@ fn reset_input(api: &mut RuntimeTraceApi) {
     api.pending_object_state = None;
     api.mouse_pressed = false;
     api.finish_graph_knob_drag();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_operation_failure_keeps_original_best_effort_policy() {
+        assert!(handle_window_failure(Some((640, 408)), false,
+            WindowError::Operation("operation 4 status 6: ASTRA_EMU_WINDOW_EXECUTION".into())).is_ok());
+    }
+
+    #[test]
+    fn other_window_operations_remain_fatal() {
+        assert!(handle_window_failure(None, false, WindowError::Operation("title failed".into())).is_err());
+    }
+
+    #[test]
+    fn cursor_cancellation_and_stale_context_are_not_swallowed() {
+        assert!(handle_window_failure(Some((1, 2)), false, WindowError::Interrupted("cancelled".into())).is_err());
+        assert!(handle_window_failure(Some((1, 2)), true, WindowError::Operation("closing".into())).is_err());
+    }
+
+    #[test]
+    fn invalid_cursor_protocol_remains_fatal() {
+        let error = handle_window_failure(Some((1, 2)), false,
+            WindowError::Protocol("invalid native window result".into())).unwrap_err();
+        assert!(error.to_string().contains("invalid native window result"));
+    }
 }

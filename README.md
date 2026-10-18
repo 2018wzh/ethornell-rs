@@ -59,6 +59,12 @@ mode because the host has no cancellable service for them; message, text and
 bounded item dialogs use the typed host modal service.
 Host failures retain the requested operation, flags and coordinates together
 with the Host error code and message; failed window operations are not acknowledged.
+Only native void cursor motion retains the fixed upstream
+`6550460beb2012781cdaffdf18da59780de422ef` frontend policy
+(`crates/ethornell-app/src/window.rs:389-397`): an execution failure is warned
+and gameplay continues, without acknowledging a successful warp or updating
+actual Host cursor state. Cancellation, stale context, malformed protocol and
+other window/modal operations remain errors.
 
 Dependencies are exact git revisions: `astra-emu-abi` from
 `2018wzh/AstraEngine@15a39a626b1316cb6137a75e17e14a2ff2d1ba88` (C ABI 2), and Kira 0.8.7
