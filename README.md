@@ -85,22 +85,14 @@ Cargo ignores dependency-local patches.
 Build commands from this directory:
 
 ```sh
-cargo build -p astra-emu-ethornell --features diagnostic-bridge --target-dir target/dynamic
-cargo build -p astra-emu-ethornell --no-default-features --target-dir target/static
-cargo run -p ethornell-cli -- run --game /path/to/game
-cargo run --manifest-path ../../Cargo.toml -p astra-emu-manager
-git worktree add ../ethornell-original 6550460beb2012781cdaffdf18da59780de422ef
-cargo run --manifest-path ../ethornell-original/Cargo.toml -p ethornell-cli -- run --game /path/to/game
+cargo build --release -p astra-emu-ethornell --features diagnostic-bridge --target-dir target/dynamic
 ```
 
-For runtime acceptance, load `target/dynamic/debug/astra_emu_ethornell.dll`
-in the integrated Astra Manager with the same game root as the standalone
-command. Compare title/menu, dialogue,
-choices, animated transitions, movie/audio, native save/load, pointer edges,
-focus loss, pause/resume and close/reopen. Retain a CPU lease across close and
-release it afterward. Cancel once during open and once during a modal wait.
-Also compare against a separate checkout of the exact upstream revision.
-These commands and the adapter are not evidence of an exercised game ending.
+For manual acceptance, load `target/dynamic/release/astra_emu_ethornell.dll`
+in the integrated Astra Manager using an authorized game copy and isolated user
+files. Exercise title/menu, dialogue, native save/load, pause/resume and
+close/reopen through the real Manager window. Run acceptance manually, without
+automated input or screenshot drivers.
 
 License provenance remains unresolved for publication: upstream's root
 `[workspace.package]` declares `MPL-2.0`, but its crate manifests do not inherit
