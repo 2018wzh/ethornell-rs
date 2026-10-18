@@ -28,9 +28,9 @@ change the encoding of resource names or BP system strings.
 
 ## Astra embedded adaptation
 
-The local `astra` branch derives from xmoezzz/ethornell-rs
-`6550460beb2012781cdaffdf18da59780de422ef`. The local `master` branch preserves
-that upstream revision. `astra-emu-ethornell` is a thin ABI adapter around the
+The published [`astra`](https://github.com/2018wzh/ethornell-rs/tree/astra)
+branch derives from xmoezzz/ethornell-rs
+`6550460beb2012781cdaffdf18da59780de422ef`. `astra-emu-ethornell` is a thin ABI adapter around the
 original BGI VM, native media/audio/save implementation and GPU compositor.
 The standalone and embedded frontends share graph, text, ruby and modeless-UI
 composition. Embedded rendering reads the final offscreen GPU target; it does
@@ -94,8 +94,10 @@ files. Exercise title/menu, dialogue, native save/load, pause/resume and
 close/reopen through the real Manager window. Run acceptance manually, without
 automated input or screenshot drivers.
 
-License provenance remains unresolved for publication: upstream's root
-`[workspace.package]` declares `MPL-2.0`, but its crate manifests do not inherit
-that license and the pinned tree contains no LICENSE/COPYING file or source
-license grant. This adaptation preserves those declarations verbatim, adds
-no relicensing claim, and must not be published until provenance is clarified.
+License provenance remains unresolved: upstream's root `[workspace.package]`
+declares `MPL-2.0`, but its crate manifests do not inherit that license and the
+pinned tree contains no LICENSE/COPYING file or source license grant.
+The source adaptation is published to `astra` under explicit user authorization.
+Publication does not resolve the original components' license coverage or grant
+new rights; this adaptation preserves existing declarations without relicensing.
+Binary redistribution remains pending provenance clarification.
