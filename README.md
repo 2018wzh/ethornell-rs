@@ -57,6 +57,8 @@ Close/reopen does not recreate an OS event loop. Native file/folder chooser
 requests and desktop-wallpaper changes currently fail explicitly in embedded
 mode because the host has no cancellable service for them; message, text and
 bounded item dialogs use the typed host modal service.
+Host failures retain the requested operation, flags and coordinates together
+with the Host error code and message; failed window operations are not acknowledged.
 
 Dependencies are exact git revisions: `astra-emu-abi` from
 `2018wzh/AstraEngine@15a39a626b1316cb6137a75e17e14a2ff2d1ba88` (C ABI 2), and Kira 0.8.7

@@ -56,7 +56,12 @@ impl Host {
         let status = unsafe { callback(self.services.host.window.context, &request, &mut result, &mut error) };
         if status == CANCELLED && !self.cancelled() { return Ok(None); }
         if status != OK {
-            return Err(format!("native window service status {status}: {}", String::from_utf8_lossy(&error.message[..(error.message_len as usize).min(error.message.len())])));
+            return Err(format!(
+                "native window operation {} flags {} at ({}, {}) service status {status}: {}: {}",
+                request.kind, request.flags, request.x, request.y,
+                String::from_utf8_lossy(&error.code[..(error.code_len as usize).min(error.code.len())]),
+                String::from_utf8_lossy(&error.message[..(error.message_len as usize).min(error.message.len())]),
+            ));
         }
         if result.reserved != 0 || result.input.data != data || result.input.capacity != input.len() || result.input.len > input.len() {
             return Err("invalid native window result".into());
