@@ -1,4 +1,4 @@
-use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
+use ab_glyph::{Font, FontArc, FontVec, PxScale, ScaleFont};
 use ethornell_core::{EthornellError, NativeBlendPath, Result, classify_native_blend};
 use ethornell_image::DecodedImage;
 use std::collections::{BTreeMap, BTreeSet};
@@ -190,12 +190,12 @@ impl<'w> Renderer<'w> {
         let surface = instance
             .create_surface(window)
             .map_err(|err| EthornellError::Other(format!("create surface failed: {err}")))?;
-        Self::create(instance, Some(surface), size.width, size.height).await
+        Self::create(instance, Some(surface), size.width, size.height, None).await
     }
 
     /// Uses the original compositor without owning an OS window or presenting.
-    pub async fn offscreen(width: u32, height: u32) -> Result<Self> {
-        Self::create(wgpu::Instance::default(), None, width, height).await
+    pub async fn offscreen(width: u32, height: u32, font: Option<FontArc>) -> Result<Self> {
+        Self::create(wgpu::Instance::default(), None, width, height, font).await
     }
 
     async fn create(
@@ -203,6 +203,7 @@ impl<'w> Renderer<'w> {
         surface: Option<wgpu::Surface<'w>>,
         width: u32,
         height: u32,
+        font: Option<FontArc>,
     ) -> Result<Self> {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -382,7 +383,7 @@ impl<'w> Renderer<'w> {
             text_cache: BTreeMap::new(),
             next_texture_id: 1,
             commands: Vec::new(),
-            font: load_system_cjk_font()?,
+            font: match font { Some(font) => font, None => load_system_cjk_font()? },
             virtual_width: 1280.0,
             virtual_height: 720.0,
         })
@@ -1072,6 +1073,15 @@ mod viewport_tests {
             None
         );
     }
+}
+
+/// Load the explicitly selected SFNT/TTC face. Invalid files and face indices
+/// are errors; an explicitly selected game font never falls back to the OS.
+pub fn load_font_file(path: &std::path::Path, index: u32) -> Result<FontArc> {
+    let bytes = std::fs::read(path)?;
+    FontVec::try_from_vec_and_index(bytes, index)
+        .map(FontArc::from)
+        .map_err(|_| EthornellError::Other("selected font file or face is invalid".into()))
 }
 
 pub fn load_system_cjk_font() -> Result<FontArc> {

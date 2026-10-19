@@ -141,21 +141,25 @@ pub struct Embedded {
 }
 
 impl Embedded {
-    pub fn open(root: &Path, trace: bool, fail_on_stub: bool, host: Rc<RefCell<dyn HostWindow>>) -> Result<Self> {
+    pub fn open(root: &Path, trace: bool, fail_on_stub: bool, display: &crate::localization::DisplayConfiguration, host: Rc<RefCell<dyn HostWindow>>) -> Result<Self> {
         let check_cancelled = || {
             if host.borrow().cancelled() { Err(EthornellError::Other("open cancelled".into())) } else { Ok(()) }
         };
         check_cancelled()?;
+        let font = display.load_font(root)?;
         let manager = ResourceManager::open_game(root)?;
         check_cancelled()?;
         let bytes = manager.read_decoded_from_archive("system.arc", "ipl._bp")?;
         check_cancelled()?;
         let native_root = game_root_path(&manager);
         let mut runtime = RuntimeEngine::new("system.arc:ipl._bp", &bytes, manager, native_root, trace, fail_on_stub, true);
+        runtime.vm.set_graph_text_encoding(display.text_encoding.encoding());
+        runtime.api.display_encoding = display.text_encoding;
+        runtime.api.display_font = font.clone();
         check_cancelled()?;
         let width = runtime.api.screen_width.max(1) as u32;
         let height = runtime.api.screen_height.max(1) as u32;
-        let renderer = pollster::block_on(Renderer::offscreen(width, height))?;
+        let renderer = pollster::block_on(Renderer::offscreen(width, height, font))?;
         runtime.api.graphics_memory_metric = renderer.graphics_memory_metric();
         check_cancelled()?;
         let audio = AudioSystem::new()?;

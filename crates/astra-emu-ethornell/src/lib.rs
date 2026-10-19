@@ -1,13 +1,14 @@
 //! Thin C ABI adapter. BGI scheduling, composition, audio and save remain native.
 use astra_emu_abi::*;
 use ethornell_app::embedded::{Embedded, Frame, HostWindow, Input, WindowCommand, WindowError, WindowFeedback, FRAME_INTERVAL};
+use ethornell_app::localization::{DisplayConfiguration, DisplayEncoding};
 use std::{cell::RefCell, ffi::c_void, panic::{catch_unwind, AssertUnwindSafe}, path::PathBuf, ptr,
     rc::Rc, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}, mpsc::{self, Receiver, SyncSender}},
     thread::{self, JoinHandle}, time::Instant};
 
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 const fn bytes(text: &'static str) -> Bytes { Bytes { data: text.as_ptr(), len: text.len() } }
-struct Schema([ConfigField; 2]);
+struct Schema([ConfigField; 5]);
 // These pointers refer exclusively to immutable library-lifetime string literals.
 unsafe impl Sync for Schema {}
 const fn boolean(id: &'static str, label: &'static str) -> ConfigField {
@@ -16,10 +17,56 @@ const fn boolean(id: &'static str, label: &'static str) -> ConfigField {
         integer_min: 0, integer_max: 1, number_min: 0.0, number_max: 0.0, max_bytes: 0, reserved: 0,
         choices: ptr::null(), choice_count: 0 }
 }
-static SCHEMA: Schema = Schema([boolean("trace", "Trace native VM"), boolean("fail_on_stub", "Stop on unsupported native calls")]);
+struct EncodingChoices([Bytes; 2]);
+unsafe impl Sync for EncodingChoices {}
+static ENCODINGS: EncodingChoices = EncodingChoices([bytes("cp932"), bytes("gbk")]);
+static SCHEMA: Schema = Schema([
+    boolean("trace", "Trace native VM"),
+    boolean("fail_on_stub", "Stop on unsupported native calls"),
+    ConfigField { id: bytes("text_encoding"), label: bytes("Display text encoding"), group: bytes("Localization"),
+        default_value: ConfigValue { kind: VALUE_ENUM, reserved: 0, integer: 0, number: 0.0, text: bytes("cp932") },
+        integer_min: 0, integer_max: 0, number_min: 0.0, number_max: 0.0, max_bytes: 128, reserved: 0,
+        choices: ENCODINGS.0.as_ptr(), choice_count: 2 },
+    ConfigField { id: bytes("font_path"), label: bytes("Game font file"), group: bytes("Localization"),
+        default_value: ConfigValue { kind: VALUE_STRING, reserved: 0, integer: 0, number: 0.0, text: Bytes::EMPTY },
+        integer_min: 0, integer_max: 0, number_min: 0.0, number_max: 0.0, max_bytes: 4096, reserved: 0,
+        choices: ptr::null(), choice_count: 0 },
+    ConfigField { id: bytes("font_index"), label: bytes("Font face index"), group: bytes("Localization"),
+        default_value: ConfigValue { kind: VALUE_INTEGER, reserved: 0, integer: 0, number: 0.0, text: Bytes::EMPTY },
+        integer_min: 0, integer_max: 65535, number_min: 0.0, number_max: 0.0, max_bytes: 0, reserved: 0,
+        choices: ptr::null(), choice_count: 0 },
+]);
 struct Formats([Bytes; 1]);
 unsafe impl Sync for Formats {}
 static FORMATS: Formats = Formats([bytes("bgi-bp-arc")]);
+
+#[derive(Default)]
+struct OpenConfiguration {
+    trace: bool,
+    fail_on_stub: bool,
+    display: DisplayConfiguration,
+}
+unsafe fn parse_configuration(entries: &[ConfigEntry]) -> Result<OpenConfiguration, (Status, String)> {
+    unsafe { validate_config(&SCHEMA.0, entries) }.map_err(|e| failure(INVALID_ARGUMENT, e.reason))?;
+    let mut config = OpenConfiguration::default();
+    for entry in entries {
+        match unsafe { entry.id.text(128) }.map_err(|s| failure(s, "invalid configuration ID"))? {
+            "trace" => config.trace = entry.value.integer != 0,
+            "fail_on_stub" => config.fail_on_stub = entry.value.integer != 0,
+            "text_encoding" => config.display.text_encoding = match unsafe { entry.value.text.text(128) }
+                .map_err(|s| failure(s, "invalid display encoding"))? {
+                    "cp932" => DisplayEncoding::Cp932,
+                    "gbk" => DisplayEncoding::Gbk,
+                    _ => unreachable!("schema validates display encoding"),
+                },
+            "font_path" => config.display.font_path = unsafe { entry.value.text.text(4096) }
+                .map_err(|s| failure(s, "invalid font path"))?.to_owned(),
+            "font_index" => config.display.font_index = entry.value.integer as u32,
+            _ => unreachable!("schema validates configuration IDs"),
+        }
+    }
+    Ok(config)
+}
 
 #[derive(Clone, Copy)]
 struct Services { host: HostServices, epoch: u64 }
@@ -178,10 +225,10 @@ fn fail(shared: &Shared, status: Status, message: String) {
     let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
     state.status = SESSION_FAILED; state.failure = Some((status, message));
 }
-fn run(root: PathBuf, trace: bool, fail_on_stub: bool, window: WindowState, services: Services, shared: Arc<Shared>, receiver: Receiver<Command>, ready: SyncSender<Result<SurfaceInfo, String>>) {
+fn run(root: PathBuf, config: OpenConfiguration, window: WindowState, services: Services, shared: Arc<Shared>, receiver: Receiver<Command>, ready: SyncSender<Result<SurfaceInfo, String>>) {
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> {
         let host = Rc::new(RefCell::new(Host { services, cancelled: shared.cancelled.clone(), next_request: 0 }));
-        let mut engine = Embedded::open(&root, trace, fail_on_stub, host).map_err(|e| e.to_string())?;
+        let mut engine = Embedded::open(&root, config.trace, config.fail_on_stub, &config.display, host).map_err(|e| e.to_string())?;
         engine.input(Input::Window { width: window.drawable_width, height: window.drawable_height, focused: window.focused != 0, suspended: window.suspended != 0 }).map_err(|e| e.to_string())?;
         if services.cancelled() || shared.cancelled.load(Ordering::Acquire) { return Err("open cancelled".into()); }
         let (width, height) = engine.dimensions();
@@ -298,19 +345,13 @@ unsafe extern "C" fn open(request: *const OpenRequest, output: *mut OpenResult, 
         if services.cancelled() { return Err(failure(CANCELLED, "open cancelled")); }
         let root = PathBuf::from(unsafe { request.game_path.text(32768) }.map_err(|s| failure(s, "invalid game path"))?);
         let configuration = unsafe { borrowed_array(request.configuration, request.configuration_count, MAX_CONFIG_FIELDS) }.map_err(|s| failure(s, "invalid configuration span"))?;
-        unsafe { validate_config(&SCHEMA.0, configuration) }.map_err(|e| failure(INVALID_ARGUMENT, e.reason))?;
-        let mut trace = false; let mut fail_on_stub = false;
-        for entry in configuration {
-            match unsafe { entry.id.text(128) }.map_err(|s| failure(s, "invalid configuration ID"))? {
-                "trace" => trace = entry.value.integer != 0, "fail_on_stub" => fail_on_stub = entry.value.integer != 0, _ => unreachable!(),
-            }
-        }
+        let config = unsafe { parse_configuration(configuration) }?;
         let shared = Arc::new(Shared { state: Mutex::new(State { status: SESSION_WAITING, info: surface(1280, 720), output: 1, generation: 0, latest: None, failure: None }), cancelled: Arc::new(AtomicBool::new(false)) });
         let (sender, receiver) = mpsc::sync_channel(64);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let worker_shared = shared.clone(); let window = request.window;
         let worker = thread::Builder::new().name("ethornell-native".into()).stack_size(8 * 1024 * 1024)
-            .spawn(move || run(root, trace, fail_on_stub, window, services, worker_shared, receiver, ready_tx)).map_err(|e| (CORE_ERROR, e.to_string()))?;
+            .spawn(move || run(root, config, window, services, worker_shared, receiver, ready_tx)).map_err(|e| (CORE_ERROR, e.to_string()))?;
         let mut handle = Box::new(Handle { shared, sender, worker: Some(worker), services });
         let ready = ready_rx.recv();
         let info = match ready {
@@ -456,6 +497,43 @@ mod window_error_tests {
         }
         for status in [INVALID_ARGUMENT, INVALID_STATE, PANICKED, CAPACITY] {
             assert!(matches!(window_request_error(status, "protocol failed".into()), WindowError::Protocol(_)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod localization_config_tests {
+    use super::*;
+    fn text(id: &'static str, kind: u32, value: &'static str) -> ConfigEntry {
+        ConfigEntry { id: bytes(id), value: ConfigValue {
+            kind, reserved: 0, integer: 0, number: 0.0, text: bytes(value),
+        }}
+    }
+    #[test]
+    fn display_options_are_typed_and_default_to_original_behavior() {
+        let config = unsafe { parse_configuration(&[]) }.unwrap();
+        assert_eq!(config.display, DisplayConfiguration::default());
+        let entries = [
+            text("text_encoding", VALUE_ENUM, "gbk"),
+            text("font_path", VALUE_STRING, "fonts/public.ttc"),
+            ConfigEntry { id: bytes("font_index"), value: ConfigValue {
+                kind: VALUE_INTEGER, reserved: 0, integer: 1, number: 0.0, text: Bytes::EMPTY,
+            }},
+        ];
+        let config = unsafe { parse_configuration(&entries) }.unwrap();
+        assert_eq!(config.display.text_encoding, DisplayEncoding::Gbk);
+        assert_eq!(config.display.font_path, "fonts/public.ttc");
+        assert_eq!(config.display.font_index, 1);
+        assert!(!config.trace && !config.fail_on_stub);
+    }
+    #[test]
+    fn unknown_or_mistyped_display_encodings_are_not_silent_fallbacks() {
+        for entry in [
+            text("text_encoding", VALUE_ENUM, "automatic"),
+            text("text_encoding", VALUE_STRING, "gbk"),
+            text("font_path", VALUE_ENUM, "font.ttf"),
+        ] {
+            assert!(unsafe { parse_configuration(&[entry]) }.is_err());
         }
     }
 }

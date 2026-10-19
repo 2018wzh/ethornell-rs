@@ -16,6 +16,7 @@ mod character_image;
 mod debug_trace;
 mod composition;
 pub mod embedded;
+pub mod localization;
 mod display_tree;
 mod effects;
 mod graph;
@@ -459,6 +460,9 @@ struct NativeControlInputLatch {
 struct RuntimeTraceApi {
     manager: ResourceManager,
     native_root: PathBuf,
+    display_font: Option<ab_glyph::FontArc>,
+    default_display_font: std::cell::OnceCell<Option<ab_glyph::FontArc>>,
+    display_encoding: localization::DisplayEncoding,
     game_id: String,
     text_state: TextState,
     text_runtime: TextRuntime,
@@ -823,6 +827,12 @@ struct RuntimeTraceApi {
 }
 
 impl RuntimeTraceApi {
+    fn text_font(&self) -> Option<&ab_glyph::FontArc> {
+        self.display_font.as_ref().or_else(|| {
+            self.default_display_font.get_or_init(snapshot::load_default_font).as_ref()
+        })
+    }
+
     fn new(manager: ResourceManager) -> Self {
         let native_root = game_root_path(&manager);
         Self::new_with_native_root(manager, native_root)
@@ -843,6 +853,9 @@ impl RuntimeTraceApi {
         Self {
             manager,
             native_root,
+            display_font: None,
+            default_display_font: std::cell::OnceCell::new(),
+            display_encoding: localization::DisplayEncoding::default(),
             game_id,
             text_state: TextState::default(),
             text_runtime: TextRuntime::default(),
@@ -1434,6 +1447,7 @@ impl RuntimeTraceApi {
         let mut image = self.graph_bitmap_image(bitmap)?;
         let result = snapshot::rasterize_bitmap_text(
             &mut image,
+            self.text_font(),
             text,
             x,
             y,
@@ -21309,6 +21323,7 @@ impl ethornell_vm::GraphApi for RuntimeTraceApi {
         &mut self,
         call: &mut ethornell_vm::NativeCallFrame,
     ) -> ethornell_vm::VmResult<ethornell_vm::Value> {
+        localization::validate_display_font(self.display_font.as_ref(), call)?;
         if let Some(result) = self.dispatch_native_graph(call) {
             return result;
         }

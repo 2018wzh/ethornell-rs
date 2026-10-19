@@ -192,7 +192,7 @@ impl RuntimeTraceApi {
                     );
                 }
                 let advance =
-                    snapshot::measure_text_advance(&normalized, size as f32, spacing as f32);
+                    snapshot::measure_text_advance(self.text_font(), &normalized, size as f32, spacing as f32);
                 let result = if id == 0x1c {
                     advance
                 } else {
@@ -238,9 +238,11 @@ impl RuntimeTraceApi {
                 if (size - 8) as u32 > 0xC0 {
                     return fail(format!("font size {size} is out of range"));
                 }
-                let bytes = encoding_rs::SHIFT_JIS.encode(&text).0.into_owned();
+                let bytes = self.display_encoding.encoding().encode(&text).0.into_owned();
                 let (glyphs, advance) = snapshot::layout_direct_bitmap_text(
                     &bytes,
+                    self.text_font(),
+                    self.display_encoding,
                     x,
                     y,
                     size as u32,
