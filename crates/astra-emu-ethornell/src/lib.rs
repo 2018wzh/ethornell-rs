@@ -11,30 +11,28 @@ const fn bytes(text: &'static str) -> Bytes { Bytes { data: text.as_ptr(), len: 
 struct Schema([ConfigField; 5]);
 // These pointers refer exclusively to immutable library-lifetime string literals.
 unsafe impl Sync for Schema {}
-const fn boolean(id: &'static str, label: &'static str) -> ConfigField {
-    ConfigField { id: bytes(id), label: bytes(label), group: bytes("Native startup"),
-        default_value: ConfigValue { kind: VALUE_BOOL, reserved: 0, integer: 0, number: 0.0, text: Bytes::EMPTY },
-        integer_min: 0, integer_max: 1, number_min: 0.0, number_max: 0.0, max_bytes: 0, reserved: 0,
-        choices: ptr::null(), choice_count: 0 }
+const fn field(id: &'static str, label: &'static str, group: &'static str, description: &'static str, default_value: ConfigValue) -> ConfigField {
+    ConfigField { id: bytes(id), label: bytes(label), group: bytes(group), default_value,
+        integer_min: 0, integer_max: 0, number_min: 0.0, number_max: 0.0, max_bytes: 0, flags: 0,
+        choices: ptr::null(), choice_count: 0, description: bytes(description), choice_labels: ptr::null(), step: 0.0, unit: Bytes::EMPTY }
+}
+const fn value(kind: u32, text: Bytes) -> ConfigValue { ConfigValue { kind, reserved: 0, integer: 0, number: 0.0, text } }
+const fn boolean(id: &'static str, label: &'static str, description: &'static str) -> ConfigField {
+    ConfigField { integer_max: 1, flags: CONFIG_FLAG_ADVANCED, ..field(id, label, "高级", description, value(VALUE_BOOL, Bytes::EMPTY)) }
 }
 struct EncodingChoices([Bytes; 2]);
 unsafe impl Sync for EncodingChoices {}
 static ENCODINGS: EncodingChoices = EncodingChoices([bytes("cp932"), bytes("gbk")]);
+static ENCODING_LABELS: EncodingChoices = EncodingChoices([bytes("Shift-JIS（日文原版）"), bytes("GBK（简体中文）")]);
 static SCHEMA: Schema = Schema([
-    boolean("trace", "Trace native VM"),
-    boolean("fail_on_stub", "Stop on unsupported native calls"),
-    ConfigField { id: bytes("text_encoding"), label: bytes("Display text encoding"), group: bytes("Localization"),
-        default_value: ConfigValue { kind: VALUE_ENUM, reserved: 0, integer: 0, number: 0.0, text: bytes("cp932") },
-        integer_min: 0, integer_max: 0, number_min: 0.0, number_max: 0.0, max_bytes: 128, reserved: 0,
-        choices: ENCODINGS.0.as_ptr(), choice_count: 2 },
-    ConfigField { id: bytes("font_path"), label: bytes("Game font file"), group: bytes("Localization"),
-        default_value: ConfigValue { kind: VALUE_STRING, reserved: 0, integer: 0, number: 0.0, text: Bytes::EMPTY },
-        integer_min: 0, integer_max: 0, number_min: 0.0, number_max: 0.0, max_bytes: 4096, reserved: 0,
-        choices: ptr::null(), choice_count: 0 },
-    ConfigField { id: bytes("font_index"), label: bytes("Font face index"), group: bytes("Localization"),
-        default_value: ConfigValue { kind: VALUE_INTEGER, reserved: 0, integer: 0, number: 0.0, text: Bytes::EMPTY },
-        integer_min: 0, integer_max: 65535, number_min: 0.0, number_max: 0.0, max_bytes: 0, reserved: 0,
-        choices: ptr::null(), choice_count: 0 },
+    boolean("trace", "跟踪原生虚拟机", "在日志中逐条记录 BGI 虚拟机执行与原生调用，用于排查问题，会明显增加日志量。"),
+    boolean("fail_on_stub", "遇到未实现调用时停止", "脚本调用尚未实现的原生功能时立即结束游戏并报告，关闭时跳过该调用继续运行。"),
+    ConfigField { max_bytes: 128, choices: ENCODINGS.0.as_ptr(), choice_count: 2, choice_labels: ENCODING_LABELS.0.as_ptr(),
+        ..field("text_encoding", "文本显示编码", "语言", "决定游戏画面上的文字按哪种编码解码显示，汉化版通常需要 GBK；资源文件名与脚本逻辑不受影响。", value(VALUE_ENUM, bytes("cp932"))) },
+    ConfigField { max_bytes: 4096, flags: CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE,
+        ..field("font_path", "游戏字体文件", "语言", "用于显示游戏文字的字体文件，路径相对游戏目录；留空时沿用原有字体。", value(VALUE_STRING, Bytes::EMPTY)) },
+    ConfigField { integer_max: 65535, step: 1.0, flags: CONFIG_FLAG_ADVANCED,
+        ..field("font_index", "字体序号", "语言", "字体集合（TTC）中要使用的字体序号，从 0 开始；非 0 时必须同时指定字体文件。", value(VALUE_INTEGER, Bytes::EMPTY)) },
 ]);
 struct Formats([Bytes; 1]);
 unsafe impl Sync for Formats {}
@@ -219,7 +217,7 @@ impl Drop for Handle {
 }
 fn surface(width: u32, height: u32) -> SurfaceInfo {
     SurfaceInfo { kind: SURFACE_CPU, pixel_format: PIXEL_RGBA8, color: COLOR_SRGB, alpha: ALPHA_IGNORED,
-        rows: ROWS_TOP_DOWN, backend: 0, logical: Extent { width, height }, raster: Extent { width, height }, stride: u64::from(width) * 4 }
+        rows: ROWS_TOP_DOWN, logical: Extent { width, height }, raster: Extent { width, height }, stride: u64::from(width) * 4 }
 }
 fn fail(shared: &Shared, status: Status, message: String) {
     let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -312,7 +310,8 @@ unsafe extern "C" fn describe(output: *mut Descriptor, error: *mut Error) -> Sta
         initialized()?;
         if output.is_null() || !output.is_aligned() { return Err(failure(INVALID_ARGUMENT, "missing descriptor output")); }
         unsafe { *output = Descriptor { header: Header::of::<Descriptor>(), family_id: bytes("ethornell"), plugin_id: bytes("astra-emu-ethornell"), version: bytes("0.1.0"), capabilities: CAP_CPU_SURFACE,
-            formats: FORMATS.0.as_ptr(), format_count: FORMATS.0.len(), configuration: SCHEMA.0.as_ptr(), configuration_count: SCHEMA.0.len() }; }
+            formats: FORMATS.0.as_ptr(), format_count: FORMATS.0.len(), configuration: SCHEMA.0.as_ptr(), configuration_count: SCHEMA.0.len(),
+            display_name: bytes("ethornell-rs"), family_name: bytes("Ethornell / BGI"), render: RenderExtentSupport::default() }; }
         Ok(())
     })
 }
@@ -337,6 +336,7 @@ unsafe extern "C" fn open(request: *const OpenRequest, output: *mut OpenResult, 
         if !request.header.accepts::<OpenRequest>() || !request.host.header.accepts::<HostServices>() || request.session_epoch == 0 || request.host.cancellation.is_cancelled.is_none() {
             return Err(failure(INVALID_ARGUMENT, "invalid open request or cancellation service"));
         }
+        RenderExtentSupport::default().validate_request(CAP_CPU_SURFACE, request.render_extent).map_err(|s| failure(s, "render extent is not supported"))?;
         if request.host.window.request.is_some() != request.host.window.invalidate.is_some() { return Err(failure(INVALID_ARGUMENT, "window service must support cancellation")); }
         if request.window.focused > 1 || request.window.suspended > 1 || !request.window.scale_factor.is_finite() || request.window.scale_factor <= 0.0 {
             return Err(failure(INVALID_ARGUMENT, "invalid initial window state"));
@@ -525,6 +525,20 @@ mod localization_config_tests {
         assert_eq!(config.display.font_path, "fonts/public.ttc");
         assert_eq!(config.display.font_index, 1);
         assert!(!config.trace && !config.fail_on_stub);
+    }
+    #[test]
+    fn descriptor_and_schema_satisfy_v3_contract() {
+        INITIALIZED.store(true, Ordering::Release);
+        let mut descriptor = std::mem::MaybeUninit::<Descriptor>::uninit();
+        assert_eq!(unsafe { describe(descriptor.as_mut_ptr(), ptr::null_mut()) }, OK);
+        let descriptor = unsafe { descriptor.assume_init() };
+        assert_eq!(unsafe { descriptor.validate() }, Ok(()));
+        assert_eq!(descriptor.capabilities & CAP_RENDER_EXTENT, 0);
+        assert_eq!(unsafe { descriptor.plugin_id.text(128) }, Ok("astra-emu-ethornell"));
+        assert_eq!(unsafe { descriptor.display_name.text(64) }, Ok("ethornell-rs"));
+        assert_eq!(unsafe { descriptor.family_name.text(64) }, Ok("Ethornell / BGI"));
+        assert!(unsafe { validate_config(&SCHEMA.0, &[]) }.is_ok());
+        assert_eq!(RenderExtentSupport::default().validate_request(descriptor.capabilities, Extent { width: 1280, height: 720 }), Err(INVALID_ARGUMENT));
     }
     #[test]
     fn unknown_or_mistyped_display_encodings_are_not_silent_fallbacks() {

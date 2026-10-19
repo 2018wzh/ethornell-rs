@@ -41,7 +41,9 @@ The descriptor and probe share the format identifier `bgi-bp-arc`. This is a
 machine-readable ABI symbol, not a display label with spaces or slashes.
 `diagnostic-bridge` is for dynamically loaded modules. Static builds reuse the
 host tracing subscriber. Startup-only configuration fields are `trace` and
-`fail_on_stub`; no text/resource hooks or live configuration are advertised.
+`fail_on_stub` (advanced) plus the display localization fields; no text/resource
+hooks, live configuration or render-extent control are advertised, and open
+rejects any nonzero requested render extent.
 Logical size L is the script's native screen size. Raster R equals L. Output O
 is the host's actual client size and does not resize R. Pointer coordinates
 already refer to the displayed raster; the adapter applies no second host

@@ -3,8 +3,10 @@
 The Astra ABI exposes three per-game fields:
 
 - `text_encoding`: `cp932` (default) or `gbk`, applied only at native graph-text presentation boundaries through the existing VM graph-text decoding option.
-- `font_path`: game-root-relative font file, empty by default to retain existing font selection.
-- `font_index`: zero-based SFNT/TTC face index, default `0`; a nonzero index requires an explicit font file.
+- `font_path`: game-root-relative font file, empty by default to retain existing font selection. Declared with `CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE`.
+- `font_index`: zero-based SFNT/TTC face index, default `0`; a nonzero index requires an explicit font file. Declared as advanced with step `1`.
+
+All fields carry Chinese labels, descriptions and groups (`语言`, `高级`); `text_encoding` choices are labelled `Shift-JIS（日文原版）` and `GBK（简体中文）`. The ABI v3 descriptor reports display name `ethornell-rs` and family name `Ethornell / BGI`.
 
 The selected face is shared by GPU text rendering, CPU text composition, bitmap-text rasterization and glyph measurement. Missing files, invalid faces and missing required presentation glyphs fail explicitly instead of substituting a system font. Graph92 direct bitmap text uses the selected display encoding for byte-cell layout and glyph decoding.
 Default CPU font discovery is lazy and owned by each runtime, replacing the process-global cache. The standalone native CLI's existing snapshot-font environment setting remains a default discovery input; an explicit ABI font overrides it. GPU default system-font discovery is unchanged.
