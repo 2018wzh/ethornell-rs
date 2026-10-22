@@ -13,7 +13,7 @@ pub(super) fn configure(attributes: WindowAttributes, root: &Path) -> WindowAttr
     attributes.with_window_icon(icon)
 }
 
-fn load(root: &Path) -> Option<image::RgbaImage> {
+pub(super) fn load(root: &Path) -> Option<image::RgbaImage> {
     let mut candidates: Vec<_> = std::fs::read_dir(root)
         .ok()?
         .flatten()

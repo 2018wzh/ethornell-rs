@@ -241,6 +241,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "astra-emu-abi"
+version = "0.1.0"
+source = "git+https://github.com/2018wzh/AstraEngine.git?rev=6d9d691dcc8f3d768e40b5be1d6f37366cca62d8#6d9d691dcc8f3d768e40b5be1d6f37366cca62d8"
+dependencies = [
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "astra-emu-ethornell-rs"
+version = "0.1.0"
+dependencies = [
+ "astra-emu-abi",
+ "ethornell-app",
+ "ethornell-archive",
+ "tracing",
+]
+
+[[package]]
 name = "async-channel"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -810,8 +830,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "873dab07c8f743075e57f524c583985fbaf745602acbe916a01539364369a779"
+source = "git+https://github.com/2018wzh/cpal.git?rev=65ac8a6ac1a635cc26bfc5af331295b052044908#65ac8a6ac1a635cc26bfc5af331295b052044908"
 dependencies = [
  "alsa",
  "core-foundation-sys",
@@ -2319,8 +2338,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "kira"
 version = "0.8.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8968f1eda49cdf4f6406fd5ffe590c3ca2778a1b0e50b5684974b138a99dfb2f"
+source = "git+https://github.com/2018wzh/kira.git?rev=da8668fcd5e543eec2e9ea9871b310276e09fdc5#da8668fcd5e543eec2e9ea9871b310276e09fdc5"
 dependencies = [
  "atomic-arena",
  "cpal",
@@ -5344,7 +5362,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

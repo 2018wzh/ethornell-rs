@@ -30,3 +30,7 @@ pack_source.sh
 docs/
 
 .DS_Store
+
+# Local full-history checkout of the pinned Kira dependency.
+/vendor/kira/
+/vendor/cpal/

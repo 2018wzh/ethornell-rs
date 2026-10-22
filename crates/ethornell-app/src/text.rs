@@ -357,7 +357,7 @@ impl RuntimeTraceApi {
             indent_brackets: self.graph_defaults.text_layout.mode_flag != 0,
         };
         let layout = crate::text_layout::layout_text(&parsed.text, &params, &|ch| {
-            crate::snapshot::glyph_advance(ch, size, horizontal_scale)
+            crate::snapshot::glyph_advance(self.text_font(), ch, size, horizontal_scale)
         });
         let spans = parsed.style_spans.clone();
         let color_of = move |index: usize| {
@@ -377,6 +377,7 @@ impl RuntimeTraceApi {
         let format = self.bitmap_formats.get(&bitmap).copied().unwrap_or(2);
         crate::snapshot::rasterize_placed_glyph_records(
             &mut image,
+            self.text_font(),
             format,
             &layout.glyphs,
             size,

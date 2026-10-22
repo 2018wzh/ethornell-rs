@@ -303,6 +303,7 @@ pub(crate) fn choose_path(
     default_name: &str,
     filters: &[PathDialogFilter],
 ) -> Option<String> {
+    if crate::embedded::unsupported_dialog("path dialog") { return None; }
     choose_path_platform(mode, title, initial_directory, default_name, filters).map(|path| {
         let path = PathBuf::from(path);
         path.to_string_lossy().into_owned()
@@ -380,6 +381,7 @@ fn show_text_platform(title: &str, text: &str) -> bool {
 }
 
 pub(crate) fn show_text(title: &str, text: &str) -> bool {
+    if let Some(answer) = crate::embedded::message_dialog(0, title, text, true) { return answer.unwrap_or(false); }
     show_text_platform(title, text)
 }
 
@@ -539,6 +541,13 @@ pub(crate) fn show_message(
     text: &str,
     default_first: bool,
 ) -> Option<bool> {
+    let embedded_kind = match kind {
+        MessageDialogKind::Information => 0,
+        MessageDialogKind::YesNo => 1,
+        MessageDialogKind::OkCancel => 2,
+        MessageDialogKind::RetryCancel => 3,
+    };
+    if let Some(answer) = crate::embedded::message_dialog(embedded_kind, title, text, default_first) { return answer; }
     show_message_platform(kind, title, text, default_first)
 }
 
@@ -726,6 +735,9 @@ pub(crate) fn prompt_text(
     max_bytes: usize,
     constraint: TextInputConstraint,
 ) -> Option<String> {
+    if let Some(answer) = crate::embedded::text_dialog(title, prompt, initial) {
+        return answer.map(|value| constrain_text(&value, max_bytes, constraint));
+    }
     let value = prompt_text_platform(title, prompt, initial)?;
     Some(constrain_text(&value, max_bytes, constraint))
 }
@@ -908,6 +920,7 @@ fn choose_item_platform(title: &str, prompt: &str, options: &[String]) -> Option
 }
 
 pub(crate) fn choose_item(title: &str, prompt: &str, options: &[String]) -> Option<String> {
+    if let Some(answer) = crate::embedded::item_dialog(title, prompt, options) { return answer; }
     choose_item_platform(title, prompt, options)
 }
 
@@ -1047,5 +1060,6 @@ fn set_wallpaper_platform(path: &str, style: i32, _tile: i32) -> bool {
 }
 
 pub(crate) fn set_wallpaper(path: &str, style: i32, tile: i32) -> bool {
+    if crate::embedded::unsupported_dialog("desktop wallpaper mutation") { return false; }
     set_wallpaper_platform(path, style, tile)
 }
