@@ -14,6 +14,12 @@ pub(crate) struct AsyncProgramTask {
     completed: bool,
 }
 
+impl AsyncProgramTask {
+    pub(crate) fn is_completed(&self) -> bool {
+        self.completed
+    }
+}
+
 impl Vm {
     /// Apply the region sizes `0x80:0x44` passed to the child thread that
     /// `start_async_program_with_args` just created.
@@ -462,6 +468,14 @@ impl Vm {
             scheduler_tasks.insert(cursor.min(scheduler_tasks.len()), task);
             self.async_tasks = scheduler_tasks;
             scheduler_hops += 1;
+
+            if report.stop_reason == VmStopReason::InterpreterTerminated {
+                // Native sub_48C990 ends the whole game on any CThread status 6,
+                // not only the CThread that returned it.
+                self.halted = true;
+                self.interpreter_terminated = true;
+                break;
+            }
 
             if report.stop_reason == VmStopReason::SwitchedThread {
                 let Some(target_thread_id) = requested_switch else {

@@ -14,6 +14,9 @@ mod auto_input;
 mod bitmap_blend;
 mod character_image;
 mod debug_trace;
+mod composition;
+pub mod embedded;
+pub mod localization;
 mod display_tree;
 mod effects;
 mod graph;
@@ -457,6 +460,9 @@ struct NativeControlInputLatch {
 struct RuntimeTraceApi {
     manager: ResourceManager,
     native_root: PathBuf,
+    display_font: Option<ab_glyph::FontArc>,
+    default_display_font: std::cell::OnceCell<Option<ab_glyph::FontArc>>,
+    display_encoding: localization::DisplayEncoding,
     game_id: String,
     text_state: TextState,
     text_runtime: TextRuntime,
@@ -821,6 +827,12 @@ struct RuntimeTraceApi {
 }
 
 impl RuntimeTraceApi {
+    fn text_font(&self) -> Option<&ab_glyph::FontArc> {
+        self.display_font.as_ref().or_else(|| {
+            self.default_display_font.get_or_init(snapshot::load_default_font).as_ref()
+        })
+    }
+
     fn new(manager: ResourceManager) -> Self {
         let native_root = game_root_path(&manager);
         Self::new_with_native_root(manager, native_root)
@@ -841,6 +853,9 @@ impl RuntimeTraceApi {
         Self {
             manager,
             native_root,
+            display_font: None,
+            default_display_font: std::cell::OnceCell::new(),
+            display_encoding: localization::DisplayEncoding::default(),
             game_id,
             text_state: TextState::default(),
             text_runtime: TextRuntime::default(),
@@ -1432,6 +1447,7 @@ impl RuntimeTraceApi {
         let mut image = self.graph_bitmap_image(bitmap)?;
         let result = snapshot::rasterize_bitmap_text(
             &mut image,
+            self.text_font(),
             text,
             x,
             y,
@@ -8298,6 +8314,11 @@ impl RuntimeEngine {
                 "VM host watchdog ended this scheduler pass"
             );
         }
+        if self.vm.game_ended() {
+            // Native sub_48C990 leaves its main loop on CThread status 6 or
+            // once the last CThread has returned.
+            self.api.quit_requested = true;
+        }
         RuntimeFrameReport {
             last_report: Some(report),
             total_steps,
@@ -8667,6 +8688,35 @@ mod input_tests {
         api.native_system.native_close_mode = 1;
         assert!(api.handle_host_window_close("test-native"));
         assert!(api.queued_system_events.is_empty());
+    }
+
+    fn runtime_with_code(code: &[u8]) -> super::RuntimeEngine {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let manager = ethornell_archive::ResourceManager::open_game(&root).unwrap();
+        super::RuntimeEngine::new("test:exit._bp", code, manager, root, false, false, false)
+    }
+
+    #[test]
+    fn terminate_interpreter_finishes_the_runtime_without_a_quit_event() {
+        // Sys80:6A, ret
+        let mut runtime = runtime_with_code(&[0x80, 0x6a, 0x17]);
+        runtime.run_native_pass(super::RuntimeFramePacing, 16);
+        assert!(runtime.vm.game_ended());
+        assert!(runtime.api.quit_requested);
+    }
+
+    #[test]
+    fn intercepted_window_close_is_not_game_exit() {
+        // Sys80:5F yield, Sys80:5F yield, ret
+        let mut runtime = runtime_with_code(&[0x80, 0x5f, 0x80, 0x5f, 0x17]);
+        runtime.run_native_pass(super::RuntimeFramePacing, 16);
+        assert!(!runtime.api.quit_requested);
+
+        assert!(!runtime.api.handle_host_window_close("test"));
+        assert_eq!(runtime.api.queued_system_events.back(), Some(&[2, 0, 0]));
+        runtime.run_native_pass(super::RuntimeFramePacing, 16);
+        assert!(!runtime.vm.game_ended());
+        assert!(!runtime.api.quit_requested);
     }
 
     #[test]
@@ -21307,6 +21357,7 @@ impl ethornell_vm::GraphApi for RuntimeTraceApi {
         &mut self,
         call: &mut ethornell_vm::NativeCallFrame,
     ) -> ethornell_vm::VmResult<ethornell_vm::Value> {
+        localization::validate_display_font(self.display_font.as_ref(), call)?;
         if let Some(result) = self.dispatch_native_graph(call) {
             return result;
         }
@@ -25039,7 +25090,7 @@ fn run_headless(
                 tracing::info!(frame, "headless quit event received");
                 break;
             }
-            if runtime.vm.halted {
+            if runtime.vm.halted && !runtime.vm.root_returned_with_live_children() {
                 tracing::info!(
                     frame,
                     pc = last_report.as_ref().map(|report| report.pc),
