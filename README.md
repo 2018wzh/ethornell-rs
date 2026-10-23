@@ -26,19 +26,19 @@ This selects the encoding of text buffers passed to the graphics API, including
 dialogue and speaker names. The default is Shift-JIS (`cp932`). It does not
 change the encoding of resource names or BP system strings.
 
-## Astra embedded adaptation
+## Shinki embedded adaptation
 
-The published [`astra`](https://github.com/2018wzh/ethornell-rs/tree/astra)
-branch is xmoezzz/ethornell-rs `6550460beb2012781cdaffdf18da59780de422ef`
-plus one adaptation commit. `crates/astra-emu-ethornell-rs` (package
-`astra-emu-ethornell-rs`, library `astra_emu_ethornell_rs`, plugin id
+The [`shinki`](https://github.com/Project-Shinkirou/ethornell-rs/tree/shinki)
+branch builds on xmoezzz/ethornell-rs `6550460beb2012781cdaffdf18da59780de422ef`.
+`crates/shinki-emu-ethornell-rs` (package
+`shinki-emu-ethornell-rs`, library `shinki_emu_ethornell_rs`, plugin id
 `ethornell-rs`) is a thin ABI adapter around the
 original BGI VM, native media/audio/save implementation and GPU compositor.
 The standalone and embedded frontends share graph, text, ruby and modeless-UI
 composition. Embedded rendering reads the final offscreen GPU target; it does
 not create a window or present.
 
-The ABI exports `astra_emu_query`; static registration uses `QUERY`.
+The ABI exports `shinki_emu_query`; static registration uses `QUERY`.
 The descriptor and probe share the format identifier `bgi-bp-arc`. This is a
 machine-readable ABI symbol, not a display label with spaces or slashes.
 `diagnostic-bridge` is for dynamically loaded modules. Static builds reuse the
@@ -70,9 +70,11 @@ and gameplay continues, without acknowledging a successful warp or updating
 actual Host cursor state. Cancellation, stale context, malformed protocol and
 other window/modal operations remain errors.
 
-Dependencies are exact git revisions: `astra-emu-abi` from
-`2018wzh/AstraEngine@6d9d691dcc8f3d768e40b5be1d6f37366cca62d8` (C ABI 3), and Kira 0.8.7
-from `2018wzh/kira@da8668fcd5e543eec2e9ea9871b310276e09fdc5`. The Kira fix
+Dependencies are exact git revisions: `shinki-emu-abi` and the host-side
+`shinki-emu-build` helper from
+`Project-Shinkirou/ShinkiEMU@cb8d9dd22d7d0ab129085b324c94d6dc81fa19e3`
+(C ABI 3), and Kira 0.8.7
+from `Project-Shinkirou/kira@da8668fcd5e543eec2e9ea9871b310276e09fdc5`. The Kira fix
 is separate from the adapter, based on upstream
 `f46857e121872416fba0d539ff3d59aa99876fb8`, retaining its MIT/Apache-2.0 files.
 It joins the desktop device watcher and adds an explicit gameplay-thread
@@ -80,20 +82,25 @@ decoder owner. Native audio shutdown drops the manager/device first, then
 cancels and joins all registered movie-audio decoders. No joins run in the
 realtime callback and dropping a playback handle still leaves playback alone.
 The root patches CPAL 0.15.3 to
-`2018wzh/cpal@65ac8a6ac1a635cc26bfc5af331295b052044908` (upstream
+`Project-Shinkirou/cpal@65ac8a6ac1a635cc26bfc5af331295b052044908` (upstream
 `ac6cbb2ba55e61665a35ab88ae136a83380d1354`, original Apache-2.0 license).
 Its WASAPI stream destructor also joins when the Terminate channel is already
 disconnected. Integrating workspaces must repeat this root-level patch because
 Cargo ignores dependency-local patches.
 
-Build from the fork checkout:
+Build from the fork checkout with Rust 1.92 or newer and MSVC build tools:
 
 ```sh
-cargo build --manifest-path Cargo.toml --locked --release -p astra-emu-ethornell-rs --features diagnostic-bridge
+cargo build --manifest-path Cargo.toml --locked --release --target x86_64-pc-windows-msvc -p shinki-emu-ethornell-rs --features diagnostic-bridge
 ```
 
-For manual acceptance, load `target/release/astra_emu_ethornell_rs.dll`
-in the integrated Astra Manager using an authorized game copy and isolated user
+`build.rs` writes target/profile, `LICENSE-MPL-2.0` and `MODIFICATIONS.md` into
+`OUT_DIR/core-build.json`. No core Resources are required; archives and optional
+font overrides come from the user's game tree. The embedded adapter currently
+supports Windows x64 MSVC.
+
+For manual acceptance, load `target/x86_64-pc-windows-msvc/release/shinki_emu_ethornell_rs.dll`
+in the integrated Shinki Manager using an authorized game copy and isolated user
 files. Exercise title/menu, dialogue, native save/load, pause/resume and
 close/reopen through the real Manager window. Run acceptance manually, without
 automated input or screenshot drivers.

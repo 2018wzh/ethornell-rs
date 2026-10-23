@@ -241,26 +241,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astra-emu-abi"
-version = "0.1.0"
-source = "git+https://github.com/2018wzh/AstraEngine.git?rev=6d9d691dcc8f3d768e40b5be1d6f37366cca62d8#6d9d691dcc8f3d768e40b5be1d6f37366cca62d8"
-dependencies = [
- "tracing",
- "tracing-log",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "astra-emu-ethornell-rs"
-version = "0.1.0"
-dependencies = [
- "astra-emu-abi",
- "ethornell-app",
- "ethornell-archive",
- "tracing",
-]
-
-[[package]]
 name = "async-channel"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -830,7 +810,7 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.15.3"
-source = "git+https://github.com/2018wzh/cpal.git?rev=65ac8a6ac1a635cc26bfc5af331295b052044908#65ac8a6ac1a635cc26bfc5af331295b052044908"
+source = "git+https://github.com/Project-Shinkirou/cpal.git?rev=65ac8a6ac1a635cc26bfc5af331295b052044908#65ac8a6ac1a635cc26bfc5af331295b052044908"
 dependencies = [
  "alsa",
  "core-foundation-sys",
@@ -1176,7 +1156,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2149,7 +2129,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2338,7 +2318,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "kira"
 version = "0.8.7"
-source = "git+https://github.com/2018wzh/kira.git?rev=da8668fcd5e543eec2e9ea9871b310276e09fdc5#da8668fcd5e543eec2e9ea9871b310276e09fdc5"
+source = "git+https://github.com/Project-Shinkirou/kira.git?rev=da8668fcd5e543eec2e9ea9871b310276e09fdc5#da8668fcd5e543eec2e9ea9871b310276e09fdc5"
 dependencies = [
  "atomic-arena",
  "cpal",
@@ -2814,7 +2794,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3018,6 +2998,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad970fb455818ad6cba4c122ad012fae53ae8b4795f86378bce65e4f6bab2ca4"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "object"
+version = "0.37.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -3814,7 +3803,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3948,6 +3937,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shinki-emu-abi"
+version = "0.1.0"
+source = "git+https://github.com/Project-Shinkirou/ShinkiEMU?rev=035155c78761768bc088169a4eca982f82e9d577#035155c78761768bc088169a4eca982f82e9d577"
+dependencies = [
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "shinki-emu-build"
+version = "0.1.0"
+source = "git+https://github.com/Project-Shinkirou/ShinkiEMU?rev=035155c78761768bc088169a4eca982f82e9d577#035155c78761768bc088169a4eca982f82e9d577"
+dependencies = [
+ "anyhow",
+ "cc",
+ "object",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "shinki-emu-ethornell-rs"
+version = "0.1.0"
+dependencies = [
+ "ethornell-app",
+ "ethornell-archive",
+ "shinki-emu-abi",
+ "shinki-emu-build",
+ "tracing",
 ]
 
 [[package]]

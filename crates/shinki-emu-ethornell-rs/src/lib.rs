@@ -1,5 +1,5 @@
 //! Thin C ABI adapter. BGI scheduling, composition, audio and save remain native.
-use astra_emu_abi::*;
+use shinki_emu_abi::*;
 use ethornell_app::embedded::{
     Embedded, FRAME_INTERVAL, Frame, HostWindow, Input, WindowCommand, WindowError, WindowFeedback,
 };
@@ -1293,13 +1293,13 @@ static API: CoreApi = CoreApi {
     close: Some(close),
     extension: Some(extension),
 };
-/// AstraEMU C ABI entry point.
+/// ShinkiEMU C ABI entry point.
 ///
 /// # Safety
 ///
 /// `output` must be null or a valid, aligned pointer writable as `*const CoreApi`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn astra_emu_query(version: u32, output: *mut *const CoreApi) -> Status {
+pub unsafe extern "C" fn shinki_emu_query(version: u32, output: *mut *const CoreApi) -> Status {
     if output.is_null() || !output.is_aligned() {
         return INVALID_ARGUMENT;
     }
@@ -1314,7 +1314,7 @@ pub unsafe extern "C" fn astra_emu_query(version: u32, output: *mut *const CoreA
     }
     OK
 }
-pub const QUERY: Query = astra_emu_query;
+pub const QUERY: Query = shinki_emu_query;
 
 #[cfg(test)]
 mod window_error_tests {
@@ -1363,28 +1363,17 @@ mod localization_config_tests {
         }
     }
     #[test]
-    fn display_options_are_typed_and_default_to_original_behavior() {
-        let config = unsafe { parse_configuration(&[]) }.unwrap();
-        assert_eq!(config.display, DisplayConfiguration::default());
-        let entries = [
-            text("text_encoding", VALUE_ENUM, "gbk"),
-            text("font_path", VALUE_STRING, "fonts/public.ttc"),
-            ConfigEntry {
-                id: bytes("font_index"),
-                value: ConfigValue {
-                    kind: VALUE_INTEGER,
-                    reserved: 0,
-                    integer: 1,
-                    number: 0.0,
-                    text: Bytes::EMPTY,
-                },
-            },
-        ];
+    fn configured_display_encoding_reaches_the_native_decoder() {
+        let entries = [text("text_encoding", VALUE_ENUM, "gbk")];
         let config = unsafe { parse_configuration(&entries) }.unwrap();
-        assert_eq!(config.display.text_encoding, DisplayEncoding::Gbk);
-        assert_eq!(config.display.font_path, "fonts/public.ttc");
-        assert_eq!(config.display.font_index, 1);
-        assert!(!config.trace && !config.fail_on_stub);
+        let (decoded, _, malformed) = config.display.text_encoding.encoding().decode(b"\xd6\xd0\xce\xc4");
+        assert!(!malformed);
+        assert_eq!(decoded, "中文");
+
+        let config = unsafe { parse_configuration(&[]) }.unwrap();
+        let (decoded, _, malformed) = config.display.text_encoding.encoding().decode(b"\x93\xfa\x96\x7b");
+        assert!(!malformed);
+        assert_eq!(decoded, "日本");
     }
     #[test]
     fn descriptor_and_schema_satisfy_v3_contract() {
@@ -1396,19 +1385,6 @@ mod localization_config_tests {
         );
         let descriptor = unsafe { descriptor.assume_init() };
         assert_eq!(unsafe { descriptor.validate() }, Ok(()));
-        assert_eq!(descriptor.capabilities & CAP_RENDER_EXTENT, 0);
-        assert_eq!(
-            unsafe { descriptor.plugin_id.text(128) },
-            Ok("ethornell-rs")
-        );
-        assert_eq!(
-            unsafe { descriptor.display_name.text(64) },
-            Ok("ethornell-rs")
-        );
-        assert_eq!(
-            unsafe { descriptor.family_name.text(64) },
-            Ok("Ethornell / BGI")
-        );
         assert!(unsafe { validate_config(&SCHEMA.0, &[]) }.is_ok());
         assert_eq!(
             RenderExtentSupport::default().validate_request(

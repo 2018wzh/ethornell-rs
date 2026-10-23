@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn cursor_operation_failure_keeps_original_best_effort_policy() {
         assert!(handle_window_failure(Some((640, 408)), false,
-            WindowError::Operation("operation 4 status 6: ASTRA_EMU_WINDOW_EXECUTION".into())).is_ok());
+            WindowError::Operation("operation 4 status 6: SHINKI_EMU_WINDOW_EXECUTION".into())).is_ok());
     }
 
     #[test]

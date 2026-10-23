@@ -1,6 +1,6 @@
 # Native display localization
 
-The Astra ABI exposes three per-game fields:
+The Shinki ABI exposes three per-game fields:
 
 - `text_encoding`: `cp932` (default) or `gbk`, applied only at native graph-text presentation boundaries through the existing VM graph-text decoding option.
 - `font_path`: game-root-relative font file, empty by default to retain existing font selection. Declared with `CONFIG_FLAG_FILE_PATH | CONFIG_FLAG_GAME_RELATIVE`.
@@ -17,9 +17,9 @@ Public tests cover typed configuration/defaults, invalid font paths/faces, an or
 
 The HD external private-container consumer and additional archive ownership, and Sakura's protected private-resource consumer, remain separate conversion prerequisites. These display options do not establish complete localization support for either installation.
 
-# Astra adapter package
+# Shinki adapter package
 
-`crates/astra-emu-ethornell-rs` is the AstraEMU C ABI v3 adapter: package `astra-emu-ethornell-rs`, library `astra_emu_ethornell_rs`, plugin id `ethornell-rs`. It exports `astra_emu_query`; the `diagnostic-bridge` feature is used for the dynamically loaded `astra_emu_ethornell_rs.dll`. Its only AstraEngine dependency is `astra-emu-abi` from `2018wzh/AstraEngine@6d9d691dcc8f3d768e40b5be1d6f37366cca62d8`.
+`crates/shinki-emu-ethornell-rs` is the ShinkiEMU C ABI v3 adapter: package `shinki-emu-ethornell-rs`, library `shinki_emu_ethornell_rs`, plugin id `ethornell-rs`. It exports `shinki_emu_query`; the `diagnostic-bridge` feature is used for the dynamically loaded `shinki_emu_ethornell_rs.dll`. Its ABI and host-side build helper use `Project-Shinkirou/ShinkiEMU@cb8d9dd22d7d0ab129085b324c94d6dc81fa19e3`. The Cargo build script writes the target/profile and license inputs to `core-build.json`; Cargo owns the actual Rust library build.
 
 Core-side changes for embedding are the shared standalone/embedded composition, the offscreen embedded frontend, typed host dialogs, per-runtime font discovery and session-owned audio shutdown in `ethornell-app`, `ethornell-render` and `ethornell-audio`.
 
