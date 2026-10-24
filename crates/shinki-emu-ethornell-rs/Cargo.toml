@@ -15,10 +15,10 @@ default = []
 diagnostic-bridge = ["shinki-emu-abi/diagnostic-bridge"]
 
 [dependencies]
-shinki-emu-abi = { git = "https://github.com/Project-Shinkirou/ShinkiEMU", rev = "035155c78761768bc088169a4eca982f82e9d577" }
+shinki-emu-abi = { git = "https://github.com/Project-Shinkirou/ShinkiEMU", rev = "9cd899babbb54cbc84c3e9fbddfe192c2f9200c8" }
 ethornell-app = { path = "../ethornell-app" }
 ethornell-archive = { path = "../ethornell-archive" }
 tracing.workspace = true
 
 [build-dependencies]
-shinki-emu-build = { git = "https://github.com/Project-Shinkirou/ShinkiEMU", rev = "035155c78761768bc088169a4eca982f82e9d577" }
+shinki-emu-build = { git = "https://github.com/Project-Shinkirou/ShinkiEMU", rev = "9cd899babbb54cbc84c3e9fbddfe192c2f9200c8" }
