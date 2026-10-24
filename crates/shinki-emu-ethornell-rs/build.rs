@@ -9,8 +9,10 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
     let mut manifest = CoreBuildManifest::new("ethornell-rs", "rust-cdylib")
         .expect("Cargo must provide the core build target and profile");
-    assert_eq!(manifest.target, "x86_64-pc-windows-msvc",
-        "ethornell-rs embedded adapter currently supports only x86_64-pc-windows-msvc");
+    assert!(
+        matches!(manifest.target.as_str(), "x86_64-pc-windows-msvc" | "x86_64-unknown-linux-gnu"),
+        "ethornell-rs embedded adapter requires Windows x64/MSVC or Linux x64/GNU"
+    );
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
